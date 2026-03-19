@@ -1,0 +1,117 @@
+
+services:
+  # ───────────────────────────── BFF API ─────────────────────────────
+  bff:
+    build:
+      context: .
+      target: api
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      BFF_PORT: "8080"
+      INTERNAL_SERVICE_JWT: "${INTERNAL_SERVICE_JWT:-dev-internal-token}"
+      ADMIN_JWT: "${ADMIN_JWT:-dev-admin-token}"
+      UNIT_PRICE: "${UNIT_PRICE:-0.50}"
+      # Services (согласно ТЗ)
+      BARCODEGEN_URL: "${BARCODEGEN_URL:-http://barcodegen:8080}"
+      BILLING_URL: "${BILLING_URL:-http://billing:3000}"
+      AI_URL: "${AI_URL:-http://ai-service:8080}"
+      HISTORY_URL: "${HISTORY_URL:-http://history:3000}"
+      # Legacy services (согласно ТЗ)
+      AUTH_URL: "${AUTH_URL:-http://auth-service:3000}"
+      NOTIFICATIONS_URL: "${NOTIFICATIONS_URL:-http://notifications:3000}"
+      TRANS_HISTORY_URL: "${TRANS_HISTORY_URL:-http://trans-history:3000}"
+      # Kafka
+      KAFKA_BROKERS: "kafka:9092"
+      # Redis
+      REDIS_URL: "redis://redis:6379/0"
+      # Timeouts (ms)
+      BARCODEGEN_TIMEOUT: "30000"
+      BILLING_TIMEOUT: "5000"
+      AI_TIMEOUT: "60000"
+      # Idempotency TTL (seconds → 24h)
+      IDEMPOTENCY_TTL: "86400"
+      # Feature flags
+      ENABLE_PARTIAL_SUCCESS: "${ENABLE_PARTIAL_SUCCESS:-true}"
+      ENABLE_IDEMPOTENCY: "${ENABLE_IDEMPOTENCY:-true}"
+      ENABLE_LEGACY_AUTH: "${ENABLE_LEGACY_AUTH:-true}"
+      ENABLE_NOTIFICATIONS: "${ENABLE_NOTIFICATIONS:-true}"
+      # Rollback / maintenance
+      MAINTENANCE_MODE: "${MAINTENANCE_MODE:-false}"
+    depends_on:
+      - kafka
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ─────────────────────────── BFF Worker ────────────────────────────
+  worker:
+    build:
+      context: .
+      target: worker
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      UNIT_PRICE: "${UNIT_PRICE:-0.50}"
+      BARCODEGEN_URL: "${BARCODEGEN_URL:-http://barcodegen:8080}"
+      BILLING_URL: "${BILLING_URL:-http://billing:3000}"
+      AI_URL: "${AI_URL:-http://ai-service:8080}"
+      KAFKA_BROKERS: "kafka:9092"
+      BARCODEGEN_TIMEOUT: "30000"
+      BILLING_TIMEOUT: "5000"
+      AI_TIMEOUT: "60000"
+      ENABLE_PARTIAL_SUCCESS: "${ENABLE_PARTIAL_SUCCESS:-true}"
+      ENABLE_NOTIFICATIONS: "${ENABLE_NOTIFICATIONS:-true}"
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  # ──────────────────────────── Kafka ────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  # ──────────────────────────── Redis ────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+
+volumes:
+  zookeeper-data:
+  kafka-data:
+  redis-data:
+

@@ -1,0 +1,113 @@
+name: US_CA_08292017
+displayName: "California Driver License (Aug 2017)"
+enabled: true
+requiredInputFields:
+  - firstName
+  - lastName
+  - dateOfBirth
+calculationChain:
+  - field: DAQ
+    source: calculate
+    dependsOn: [firstName, lastName, dateOfBirth]
+  - field: DAK
+    source: calculate
+    dependsOn: [street, city, state, zipCode]
+  - field: DAE
+    source: random
+    params:
+      type: date
+      range: [-30, 0]
+  - field: DBB
+    source: calculate
+    dependsOn: [dateOfBirth]
+schema:
+  fields:
+    - name: firstName
+      type: string
+      required: true
+      label: "First Name"
+      order: 1
+      validation:
+        minLength: 1
+        maxLength: 40
+        pattern: '^[A-Z][a-zA-Z\s''-]+$'
+    - name: lastName
+      type: string
+      required: true
+      label: "Last Name"
+      order: 2
+      validation:
+        minLength: 1
+        maxLength: 40
+    - name: dateOfBirth
+      type: date
+      required: true
+      label: "Date of Birth"
+      order: 3
+      validation:
+        maxDate: "today-16y"
+    - name: street
+      type: string
+      required: false
+      label: "Street Address"
+      order: 4
+    - name: city
+      type: string
+      required: false
+      label: "City"
+      order: 5
+    - name: state
+      type: string
+      required: false
+      label: "State"
+      order: 6
+      validation:
+        minLength: 2
+        maxLength: 2
+    - name: zipCode
+      type: string
+      required: false
+      label: "ZIP Code"
+      order: 7
+      validation:
+        pattern: '^\d{5}(-\d{4})?$'
+    - name: eyeColor
+      type: enum
+      required: true
+      label: "Eye Color"
+      order: 10
+      options: [BLK, BLU, BRO, GRY, GRN, HAZ]
+    - name: height
+      type: string
+      required: false
+      label: "Height"
+      order: 11
+    - name: weight
+      type: string
+      required: false
+      label: "Weight"
+      order: 12
+    - name: signatureUrl
+      type: string
+      required: false
+      label: "Signature Image URL"
+      order: 20
+    - name: photoUrl
+      type: string
+      required: false
+      label: "Photo Image URL"
+      order: 21
+  groups:
+    - name: personal
+      label: "Personal Information"
+      fields: [firstName, lastName, dateOfBirth]
+    - name: address
+      label: "Address"
+      fields: [street, city, state, zipCode]
+    - name: physical
+      label: "Physical Description"
+      fields: [eyeColor, height, weight]
+    - name: media
+      label: "Media"
+      fields: [signatureUrl, photoUrl]
+

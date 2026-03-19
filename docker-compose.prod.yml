@@ -1,0 +1,26 @@
+services:
+  bff:
+    environment:
+      BARCODEGEN_URL: "${BARCODEGEN_URL:-http://barcodegen:8080}"
+      BILLING_URL: "${BILLING_URL:-http://billing:3000}"
+      AI_URL: "${AI_URL:-http://ai-service:8080}"
+      HISTORY_URL: "${HISTORY_URL:-http://history:3000}"
+      AUTH_URL: "${AUTH_URL:-http://auth-service:3000}"
+      NOTIFICATIONS_URL: "${NOTIFICATIONS_URL:-http://notifications:3000}"
+      TRANS_HISTORY_URL: "${TRANS_HISTORY_URL:-http://trans-history:3000}"
+      KAFKA_GROUP_ID: "${KAFKA_GROUP_ID:-bff-bulk-worker}"
+      ENABLE_LEGACY_AUTH: "${ENABLE_LEGACY_AUTH:-true}"
+      ENABLE_NOTIFICATIONS: "${ENABLE_NOTIFICATIONS:-true}"
+      ENABLE_IDEMPOTENCY: "${ENABLE_IDEMPOTENCY:-true}"
+      ENABLE_PARTIAL_SUCCESS: "${ENABLE_PARTIAL_SUCCESS:-true}"
+      MAINTENANCE_MODE: "${MAINTENANCE_MODE:-false}"
+
+  worker:
+    environment:
+      BARCODEGEN_URL: "${BARCODEGEN_URL:-http://barcodegen:8080}"
+      BILLING_URL: "${BILLING_URL:-http://billing:3000}"
+      AI_URL: "${AI_URL:-http://ai-service:8080}"
+      KAFKA_GROUP_ID: "${KAFKA_GROUP_ID:-bff-bulk-worker}"
+      ENABLE_NOTIFICATIONS: "${ENABLE_NOTIFICATIONS:-true}"
+      ENABLE_PARTIAL_SUCCESS: "${ENABLE_PARTIAL_SUCCESS:-true}"
+

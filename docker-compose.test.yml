@@ -1,0 +1,14 @@
+services:
+  bff:
+    environment:
+      ENABLE_LEGACY_AUTH: "false"
+      ENABLE_NOTIFICATIONS: "false"
+      ENABLE_IDEMPOTENCY: "true"
+      ENABLE_PARTIAL_SUCCESS: "true"
+      MAINTENANCE_MODE: "false"
+
+  worker:
+    environment:
+      ENABLE_NOTIFICATIONS: "false"
+      ENABLE_PARTIAL_SUCCESS: "true"
+
