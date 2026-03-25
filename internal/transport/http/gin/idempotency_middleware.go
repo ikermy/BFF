@@ -98,9 +98,14 @@ func IdempotencyMiddleware(store ports.IdempotencyStore, enableIdempotency ...bo
 		c.Writer = capture
 		c.Next()
 
-		// Фаза 2b: сохраняем только успешные ответы (checkOrSet(key, response) из ТЗ)
+		// Фаза 2b: сохраняем только успешные ответы (checkOrSet(key, response) из ТЗ).
+		// При ошибке (не-2xx) или пустом теле — удаляем in-flight маркер:
+		// клиент должен иметь возможность ретраить с тем же ключом немедленно,
+		// а не ждать истечения TTL, постоянно получая 409 REQUEST_IN_FLIGHT.
 		if capture.Status() >= 200 && capture.Status() < 300 && capture.body.Len() > 0 {
 			_ = store.Set(c.Request.Context(), key, capture.body.Bytes())
+		} else {
+			_ = store.Delete(c.Request.Context(), key)
 		}
 	}
 }

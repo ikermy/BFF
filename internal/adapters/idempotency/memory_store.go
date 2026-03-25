@@ -73,6 +73,16 @@ func (s *MemoryStore) Set(_ context.Context, key string, body []byte) error {
 	return nil
 }
 
+// Delete удаляет in-flight маркер, освобождая ключ для повторного запроса.
+// Вызывается middleware при ошибке хендлера (не-2xx): без этого маркер
+// блокирует все ретраи с тем же X-Idempotency-Key до истечения TTL.
+func (s *MemoryStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, key)
+	return nil
+}
+
 // cleanup удаляет просроченные записи каждые 5 минут.
 func (s *MemoryStore) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)

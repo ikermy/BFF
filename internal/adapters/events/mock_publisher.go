@@ -14,6 +14,7 @@ type MockPublisher struct {
 	mu                  sync.Mutex
 	GenerationCompletes []domain.NotificationRequest
 	GenerationErrors    []domain.ErrorNotificationRequest
+	BarcodeEdited       []domain.BarcodeEditedEvent
 }
 
 func NewMockPublisher() *MockPublisher {
@@ -39,6 +40,9 @@ func (p *MockPublisher) PublishPartialCompleted(_ context.Context, event domain.
 
 // PublishBarcodeEdited публикует barcode.edited после бесплатного редактирования (п.10.1 ТЗ).
 func (p *MockPublisher) PublishBarcodeEdited(_ context.Context, event domain.BarcodeEditedEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.BarcodeEdited = append(p.BarcodeEdited, event)
 	log.Printf("event barcode.edited published: id=%s field=%s newUrl=%s",
 		event.ID, event.Field, event.NewURL)
 	return nil

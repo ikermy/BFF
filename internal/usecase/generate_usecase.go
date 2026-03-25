@@ -170,7 +170,10 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 	}
 
 	// sagaID вычисляется один раз — используется и для AI (SagaID в запросе) и для Billing.Block.
-	sagaID := fmt.Sprintf("saga-%s-%s", req.BuildID, req.BatchID)
+	// userID включён явно: два разных пользователя с одинаковым buildID+batchID
+	// не получат одинаковый sagaID. Уникальность buildID+batchID в рамках одного
+	// пользователя — ответственность клиента (он генерирует эти поля).
+	sagaID := fmt.Sprintf("saga-%s-%s-%s", userID, req.BuildID, req.BatchID)
 
 	// AI Service: генерация подписи и фото (п.9.3 ТЗ).
 	// Вызов СИНХРОННЫЙ — ошибка при явном флаге прерывает flow.
@@ -303,9 +306,28 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 		_ = u.events.PublishSagaCompleted(ctx, sagaID)
 	}
 
+	// Compute total cost for successful units (п.12 ТЗ).
+	//
+	// Основной путь: unitPrice возвращает Billing — BFF использует его напрямую (п.1 ТЗ: BFF = orchestrator).
+	// Fallback: unitPrice отсутствует (<=0) — вычисляем пропорционально фактически списанным суммам
+	// по ВСЕМ источникам (Subscription.Amount + Credits.Amount + Wallet.Amount) относительно
+	// AllowedTotal. Знаменатель = AllowedTotal (не wallet.Units!), иначе при Split Payment waterfall
+	// (Subscription→Credits→Wallet, п.6 ТЗ) стоимость завышается: юниты подписки и кредитов
+	// «прячутся» в wallet.Units и цена на юнит удваивается.
 	walletAmount := quote.BySource.Wallet.Amount
+	var totalCost float64
+	if quote.UnitPrice > 0 {
+		totalCost = float64(successCount) * quote.UnitPrice
+	} else {
+		// Fallback: суммируем денежные суммы по всем источникам и масштабируем на successCount.
+		totalAmount := quote.BySource.Subscription.Amount +
+			quote.BySource.Credits.Amount +
+			walletAmount
+		totalCost = float64(successCount) * totalAmount / float64(max(quote.AllowedTotal, 1))
+	}
+
 	billing := domain.GenerateBillingResult{
-		TotalCost:        float64(successCount) * walletAmount / float64(max(quote.BySource.Wallet.Units, 1)),
+		TotalCost:        totalCost,
 		BySource:         quote.BySource,
 		ReferralEligible: walletAmount,
 		// Реферальные бонусы начисляются ТОЛЬКО с wallet.amount (п.7.2 ТЗ).

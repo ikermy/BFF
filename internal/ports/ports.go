@@ -147,4 +147,7 @@ type IdempotencyStore interface {
 	Reserve(ctx context.Context, key string) (bool, error)
 	// Set сохраняет готовый ответ под ключом (перезаписывает in-flight маркер).
 	Set(ctx context.Context, key string, body []byte) error
+	// Delete удаляет in-flight маркер при ошибке хендлера, чтобы клиент мог
+	// повторить запрос с тем же ключом. Без этого маркер блокирует ретраи до TTL.
+	Delete(ctx context.Context, key string) error
 }

@@ -71,14 +71,16 @@ func (u *EditUseCase) Execute(ctx context.Context, userID, barcodeID string, req
 
 	// Шаг 3: бесплатная блокировка (units=0) — Billing регистрирует сагу без списания (п.10.1 ТЗ).
 	// BySource намеренно нулевой: "POST /block {credits: 0}" из ТЗ.
+	// ВАЖНО: ошибку Block нельзя игнорировать. Если Block упал — Billing не знает о саге,
+	// но barcode.edited всё равно улетит в Kafka → History поставит editFlag=true.
+	// Итог: split-brain (сага есть в History, нет в Billing) + editFlag сгорел впустую.
 	sagaID := "edit-" + barcodeID
 	if err := u.billing.Block(ctx, domain.BlockRequest{
 		UserID: userID,
 		Units:  0,
 		SagaID: sagaID,
 	}); err != nil {
-		// Block с units=0 может быть no-op в production — не прерываем flow
-		_ = err
+		return domain.EditResponse{}, domain.NewBillingError(err)
 	}
 
 	// Шаг 4: генерация нового баркода с обновлённым полем поверх исходных полей

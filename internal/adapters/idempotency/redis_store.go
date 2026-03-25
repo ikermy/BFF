@@ -84,3 +84,13 @@ func (s *RedisStore) Set(ctx context.Context, key string, body []byte) error {
 	}
 	return nil
 }
+
+// Delete удаляет in-flight маркер, освобождая ключ для повторного запроса.
+// Вызывается middleware при ошибке хендлера (не-2xx): без этого маркер
+// блокирует все ретраи с тем же X-Idempotency-Key до истечения TTL.
+func (s *RedisStore) Delete(ctx context.Context, key string) error {
+	if err := s.client.Del(ctx, keyPrefix+key).Err(); err != nil {
+		return fmt.Errorf("idempotency: redis del: %w", err)
+	}
+	return nil
+}

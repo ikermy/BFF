@@ -521,6 +521,132 @@ func TestGenerateUseCase_AI_PhotoError_Explicit(t *testing.T) {
 	}
 }
 
+// ─── п.12 Расчёт TotalCost ────────────────────────────────────────────────────
+
+// mockQuoter — минимальная реализация Quoter для точного управления quote в тестах TotalCost.
+type mockQuoter struct {
+	result domain.QuoteResult
+	err    error
+}
+
+func (m *mockQuoter) Execute(_ context.Context, _ string, _ int, _ string) (domain.QuoteResult, error) {
+	return m.result, m.err
+}
+
+// splitQuote — хелпер: Split Payment waterfall с 30 sub + 20 credits + 50 wallet.
+// unitPrice задаётся извне; суммы источников выставляются через amountPerUnit.
+func splitQuote(units int, unitPrice float64, subAmt, credAmt, walletAmt float64) domain.QuoteResult {
+	return domain.QuoteResult{
+		CanProcess:   true,
+		Requested:    units,
+		AllowedTotal: units,
+		UnitPrice:    unitPrice,
+		BySource: domain.QuoteBreakdown{
+			Subscription: domain.SourceBreakdown{Units: 30, Amount: subAmt},
+			Credits:      domain.SourceBreakdown{Units: 20, Amount: credAmt},
+			Wallet:       domain.SourceBreakdown{Units: 50, Amount: walletAmt},
+		},
+	}
+}
+
+// TestGenerateUseCase_TotalCost_UnitPricePath проверяет основной путь:
+// totalCost = successCount * unitPrice (п.12 ТЗ).
+func TestGenerateUseCase_TotalCost_UnitPricePath(t *testing.T) {
+	// sub=30, cred=20, wallet=50 ($25); unitPrice=0.50; all 100 succeed
+	q := splitQuote(100, 0.50, 0, 0, 25.00)
+	billingClient := billing.NewMockClient(1.0)
+	uc := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), &mockQuoter{result: q})
+
+	result, err := uc.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417",
+		Units: 100, Confirmed: true, BuildID: "b1", BatchID: "ba1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := 100 * 0.50 // = 50.00
+	if result.Billing.TotalCost != want {
+		t.Errorf("TotalCost (unitPrice path): want %.2f, got %.2f", want, result.Billing.TotalCost)
+	}
+}
+
+// TestGenerateUseCase_TotalCost_Fallback_AllSources проверяет fallback (unitPrice=0):
+// totalCost суммирует Subscription.Amount + Credits.Amount + Wallet.Amount
+// и делит на AllowedTotal — НЕ на wallet.Units (п.6 ТЗ: Split Payment waterfall).
+func TestGenerateUseCase_TotalCost_Fallback_AllSources(t *testing.T) {
+	// sub=30 ($15), cred=20 ($10), wallet=50 ($25); unitPrice=0 (fallback)
+	// totalAmount = 50.00; AllowedTotal = 100
+	// want: 100 * 50/100 = 50.00
+	q := splitQuote(100, 0, 15.00, 10.00, 25.00)
+	billingClient := billing.NewMockClient(1.0)
+	uc := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), &mockQuoter{result: q})
+
+	result, err := uc.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417",
+		Units: 100, Confirmed: true, BuildID: "b1", BatchID: "ba1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := 50.00
+	if result.Billing.TotalCost != want {
+		t.Errorf("TotalCost (fallback, all sources): want %.2f, got %.2f", want, result.Billing.TotalCost)
+	}
+}
+
+// TestGenerateUseCase_TotalCost_Fallback_WalletOnly воспроизводит баг:
+// только wallet имеет Amount ($25); unitPrice=0 (fallback).
+// Старый код: 100 * 25/50 = $50 (НЕВЕРНО — wallet.Units=50, не AllowedTotal=100).
+// Новый код:  100 * 25/100 = $25 (верно — учитывает все 100 юнитов).
+func TestGenerateUseCase_TotalCost_Fallback_WalletOnly(t *testing.T) {
+	// sub=30 ($0), cred=20 ($0), wallet=50 ($25); unitPrice=0 (fallback)
+	// want: 100 * 25/100 = 25.00
+	q := splitQuote(100, 0, 0, 0, 25.00)
+	billingClient := billing.NewMockClient(1.0)
+	uc := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), &mockQuoter{result: q})
+
+	result, err := uc.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417",
+		Units: 100, Confirmed: true, BuildID: "b1", BatchID: "ba1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := 25.00 // НЕ 50.00 (старый баг)
+	if result.Billing.TotalCost != want {
+		t.Errorf("TotalCost (fallback, wallet-only): want %.2f, got %.2f", want, result.Billing.TotalCost)
+	}
+}
+
+// TestGenerateUseCase_TotalCost_Fallback_PartialBarcodeGen проверяет fallback при частичном
+// сбое BarcodeGen: стоимость пропорциональна successCount/AllowedTotal (п.14.4 ТЗ).
+// AllowedTotal=100, wallet=$25, successCount=60 → totalCost = 60*25/100 = $15.00.
+func TestGenerateUseCase_TotalCost_Fallback_PartialBarcodeGen(t *testing.T) {
+	q := splitQuote(100, 0, 0, 0, 25.00)
+	billingClient := billing.NewMockClient(1.0)
+	uc := NewGenerateUseCase(
+		billingClient,
+		&failingBarcodeClient{successLimit: 60}, // 60 успешных, 40 упали
+		events.NewMockPublisher(),
+		&mockQuoter{result: q},
+	)
+
+	result, err := uc.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417",
+		Units: 100, Confirmed: true, BuildID: "b1", BatchID: "ba1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on partial generation: %v", err)
+	}
+	if len(result.Barcodes) != 60 {
+		t.Fatalf("expected 60 barcodes, got %d", len(result.Barcodes))
+	}
+	want := 15.00 // 60 * 25/100
+	if result.Billing.TotalCost != want {
+		t.Errorf("TotalCost (fallback, partial barcodegen): want %.2f, got %.2f", want, result.Billing.TotalCost)
+	}
+}
+
 // TestGenerateUseCase_AI_AutoTrigger_ErrorIgnored — авто-триггер signatureUrl отсутствует,
 // AI упал — ошибка игнорируется, генерация продолжается (п.9.3 ТЗ).
 func TestGenerateUseCase_AI_AutoTrigger_ErrorIgnored(t *testing.T) {
