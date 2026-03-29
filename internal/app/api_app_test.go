@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ikermy/BFF/internal/config"
@@ -15,7 +16,7 @@ func TestBuildAPIApp_UsesMockDependenciesWhenEnvIsUnset(t *testing.T) {
 	t.Setenv(config.EnvHistoryURL, "")
 	t.Setenv(config.EnvKafkaBrokers, "")
 
-	app := BuildAPIApp(config.Load())
+	app := BuildAPIAppWithContext(context.Background(), config.Load())
 	if app == nil {
 		t.Fatal("expected API app")
 	}
@@ -33,7 +34,7 @@ func TestBuildAPIApp_UsesConfiguredRealBranchesWhenEnvIsSet(t *testing.T) {
 	t.Setenv(config.EnvHistoryURL, "http://history:3000")
 	t.Setenv(config.EnvKafkaBrokers, "127.0.0.1:9092")
 
-	app := BuildAPIApp(config.Load())
+	app := BuildAPIAppWithContext(context.Background(), config.Load())
 	if app == nil {
 		t.Fatal("expected API app")
 	}

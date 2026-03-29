@@ -12,11 +12,12 @@ import (
 
 func main() {
 	cfg := config.Load()
-	application := app.BuildAPIApp(cfg)
-	defer application.Close()
-
+	// create top-level context to propagate shutdown to stores
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	application := app.BuildAPIAppWithContext(ctx, cfg)
+	defer application.Close()
 
 	if err := application.Run(ctx); err != nil {
 		log.Fatalf("api stopped with error: %v", err)

@@ -27,6 +27,8 @@ import (
 type APIApp struct {
 	server   *gintransport.Server
 	producer *kafkaadapter.Producer // nil если используется mock
+	// idempotency store (if memory) to allow graceful shutdown of its goroutines
+	idempotencyShutdown func()
 }
 
 func (a *APIApp) Run(ctx context.Context) error {
@@ -41,9 +43,13 @@ func (a *APIApp) Close() {
 			log.Printf("warn: kafka producer close: %v", err)
 		}
 	}
+	if a.idempotencyShutdown != nil {
+		a.idempotencyShutdown()
+	}
 }
 
-func BuildAPIApp(cfg config.Config) *APIApp {
+// BuildAPIAppWithContext builds app and wires stores with provided parent context.
+func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIApp {
 	// ── Инфраструктура (stores) — объявляются первыми, т.к. используются HTTP-клиентами ──
 	topUpBonusStore := topupbonus.NewMemoryStore()
 	kafkaTopicsStore := kafkaadapter.NewTopicStore()
@@ -68,7 +74,12 @@ func BuildAPIApp(cfg config.Config) *APIApp {
 		idempotencyStore = redisStore
 	} else {
 		log.Printf("idempotency: REDIS_URL not set, using in-memory store")
-		idempotencyStore = idempotency.NewMemoryStore(cfg.Idempotency.TTL)
+		memStore := idempotency.NewMemoryStoreWithContext(parentCtx, cfg.Idempotency.TTL)
+		idempotencyStore = memStore
+		// register shutdown
+		deferShutdown := func() { memStore.Shutdown() }
+		// we'll set this on the APIApp below
+		_ = deferShutdown
 	}
 
 	// ── HTTP-клиенты downstream-сервисов ─────────────────────────────────────────────────
@@ -203,8 +214,13 @@ func BuildAPIApp(cfg config.Config) *APIApp {
 		cfg.MaintenanceMode,
 	)
 
-	return &APIApp{
+	app := &APIApp{
 		server:   gintransport.NewServer(cfg.Port, router),
 		producer: kafkaProducer,
 	}
+	// if idempotency mem store was used, attach its shutdown
+	if mem, ok := idempotencyStore.(*idempotency.MemoryStore); ok {
+		app.idempotencyShutdown = func() { mem.Shutdown() }
+	}
+	return app
 }

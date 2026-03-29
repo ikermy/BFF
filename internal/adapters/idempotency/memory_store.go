@@ -21,15 +21,32 @@ type MemoryStore struct {
 	mu      sync.RWMutex
 	entries map[string]entry
 	ttl     time.Duration
+	// cancel cancels internal goroutines (cleanup)
+	cancel func()
+	wg     sync.WaitGroup
 }
 
-func NewMemoryStore(ttl time.Duration) *MemoryStore {
+// NewMemoryStore создает in-memory store и запускает фоновую очистку.
+// parentCtx — внешний контекст приложения: когда он будет cancelled
+// cleanup завершится автоматически. Также возвращаемая структура
+// поддерживает Shutdown() для явного завершения.
+// NewMemoryStoreWithContext creates store and starts cleanup goroutine tied to parentCtx.
+func NewMemoryStoreWithContext(parentCtx context.Context, ttl time.Duration) *MemoryStore {
 	s := &MemoryStore{
 		entries: make(map[string]entry),
 		ttl:     ttl,
 	}
-	go s.cleanup()
+	// создаём дочерний контекст, который можем отменить локально
+	ctx, cancel := context.WithCancel(parentCtx)
+	s.cancel = cancel
+	s.wg.Add(1)
+	go s.cleanup(ctx)
 	return s
+}
+
+// NewMemoryStore kept for backward compatibility: uses background context.
+func NewMemoryStore(ttl time.Duration) *MemoryStore {
+	return NewMemoryStoreWithContext(context.Background(), ttl)
 }
 
 // Get возвращает (body, true, nil) если ключ завершён с готовым ответом.
@@ -84,17 +101,31 @@ func (s *MemoryStore) Delete(_ context.Context, key string) error {
 }
 
 // cleanup удаляет просроченные записи каждые 5 минут.
-func (s *MemoryStore) cleanup() {
+func (s *MemoryStore) cleanup(ctx context.Context) {
+	defer s.wg.Done()
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		now := time.Now()
-		s.mu.Lock()
-		for k, e := range s.entries {
-			if now.After(e.expiresAt) {
-				delete(s.entries, k)
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			s.mu.Lock()
+			for k, e := range s.entries {
+				if now.After(e.expiresAt) {
+					delete(s.entries, k)
+				}
 			}
+			s.mu.Unlock()
+		case <-ctx.Done():
+			return
 		}
-		s.mu.Unlock()
 	}
+}
+
+// Shutdown останавливает фоновые горутины и ждёт их завершения.
+func (s *MemoryStore) Shutdown() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.wg.Wait()
 }
