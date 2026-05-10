@@ -113,29 +113,30 @@ func TestKafkaPublisher_SendGenerationComplete(t *testing.T) {
 
 	msg := fake.last(kafka.TopicNotifications)
 	if msg == nil {
-		t.Fatal("no message published to notifications.send")
+		t.Fatal("no message published to notif-events")
 	}
 
-	assertStr(t, msg, "eventType", "GENERATION_COMPLETE")
-	assertStr(t, msg, "userId", "u-1")
-	assertStr(t, msg, "channel", "email")
+	// Новый формат: {type, payload} — KafkaEvent<T> (grpc_kafka_fixes.md §2.1)
+	assertStr(t, msg, "type", "GENERATION_COMPLETE")
 
-	data, ok := msg["data"].(map[string]any)
+	payload, ok := msg["payload"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected data object, got: %T", msg["data"])
+		t.Fatalf("expected payload object, got: %T", msg["payload"])
 	}
-	assertStr(t, data, "buildId", "b-1")
-	assertStr(t, data, "downloadUrl", "https://cdn.example.com/b-1.zip")
-	if data["barcodeCount"].(float64) != 10 {
-		t.Errorf("expected barcodeCount=10, got %v", data["barcodeCount"])
+	assertStr(t, payload, "userId", "u-1")
+	assertStr(t, payload, "channel", "email")
+	assertStr(t, payload, "buildId", "b-1")
+	assertStr(t, payload, "downloadUrl", "https://cdn.example.com/b-1.zip")
+	if payload["barcodeCount"].(float64) != 10 {
+		t.Errorf("expected barcodeCount=10, got %v", payload["barcodeCount"])
 	}
-	if msg["timestamp"] == nil || msg["timestamp"] == "" {
+	if payload["timestamp"] == nil || payload["timestamp"] == "" {
 		t.Error("expected non-empty timestamp")
 	}
 }
 
-// TestKafkaPublisher_SendGenerationError — проверяет формат GENERATION_ERROR (п.11.2 ТЗ).
-// TypeScript: { eventType, userId, channel:"push", data:{error,buildId}, timestamp }
+// TestKafkaPublisher_SendGenerationError — проверяет формат GENERATION_ERROR (grpc_kafka_fixes.md §2.1).
+// Новый формат: {type, payload} — KafkaEvent<T> интерфейс Notification Service.
 func TestKafkaPublisher_SendGenerationError(t *testing.T) {
 	fake := newFakePublisher()
 	pub := NewKafkaPublisher(fake)
@@ -151,17 +152,18 @@ func TestKafkaPublisher_SendGenerationError(t *testing.T) {
 
 	msg := fake.last(kafka.TopicNotifications)
 	if msg == nil {
-		t.Fatal("no message published to notifications.send")
+		t.Fatal("no message published to notif-events")
 	}
 
-	assertStr(t, msg, "eventType", "GENERATION_ERROR")
-	assertStr(t, msg, "userId", "u-2")
-	assertStr(t, msg, "channel", "push")
+	// Новый формат: {type, payload} — KafkaEvent<T> (grpc_kafka_fixes.md §2.1)
+	assertStr(t, msg, "type", "GENERATION_ERROR")
 
-	data, ok := msg["data"].(map[string]any)
+	payload, ok := msg["payload"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected data object, got: %T", msg["data"])
+		t.Fatalf("expected payload object, got: %T", msg["payload"])
 	}
-	assertStr(t, data, "buildId", "b-2")
-	assertStr(t, data, "error", "barcodegen unavailable")
+	assertStr(t, payload, "userId", "u-2")
+	assertStr(t, payload, "channel", "push")
+	assertStr(t, payload, "buildId", "b-2")
+	assertStr(t, payload, "error", "barcodegen unavailable")
 }

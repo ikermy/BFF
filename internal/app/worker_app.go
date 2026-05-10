@@ -56,7 +56,7 @@ func BuildWorkerApp(cfg config.Config) *WorkerApp {
 	var billingClient ports.BillingClient
 	if url := os.Getenv(config.EnvBillingURL); url != "" {
 		log.Printf("worker billing: using HTTP client → %s", url)
-		billingClient = billing.NewHTTPClient(cfg.Services.BillingURL).
+		billingClient = billing.NewHTTPClient(cfg.Services.BillingURL, cfg.Services.BillingInternalKey).
 			WithTimeouts(timeoutStore)
 	} else {
 		log.Printf("worker billing: BILLING_URL not set, using mock client")

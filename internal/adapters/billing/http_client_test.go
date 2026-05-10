@@ -48,7 +48,7 @@ func TestHTTPClient_QuoteComputesShortfallAndSendsExpectedPayload(t *testing.T) 
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(server.URL)
+	client := NewHTTPClient(server.URL, "test-key")
 	result, err := client.Quote(context.Background(), "user-1", 5, "US_CA_08292017")
 	if err != nil {
 		t.Fatalf("Quote returned error: %v", err)
@@ -79,7 +79,7 @@ func TestHTTPClient_BlockReturnsStatusError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(server.URL)
+	client := NewHTTPClient(server.URL, "test-key")
 	err := client.Block(context.Background(), domain.BlockRequest{
 		UserID: "user-1",
 		Units:  1,
@@ -111,7 +111,7 @@ func TestHTTPClient_BlockBatchDecodesTransactionIDs(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(server.URL)
+	client := NewHTTPClient(server.URL, "test-key")
 	ids, err := client.BlockBatch(context.Background(), "user-1", 2, "batch-1")
 	if err != nil {
 		t.Fatalf("BlockBatch returned error: %v", err)
@@ -130,7 +130,7 @@ func TestHTTPClient_UsesDynamicTimeoutStore(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(server.URL).WithTimeouts(timeouts.NewMemoryStore(time.Second, 20*time.Millisecond, time.Second, time.Second, time.Second))
+	client := NewHTTPClient(server.URL, "test-key").WithTimeouts(timeouts.NewMemoryStore(time.Second, 20*time.Millisecond, time.Second, time.Second, time.Second))
 	err := client.Capture(context.Background(), "saga-1", 1)
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -176,7 +176,7 @@ func TestHTTPClient_ReleaseAndBlockSendExpectedPayloads(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(server.URL)
+	client := NewHTTPClient(server.URL, "test-key")
 	if err := client.Block(context.Background(), domain.BlockRequest{
 		UserID: "user-9",
 		Units:  2,

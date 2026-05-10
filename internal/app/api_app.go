@@ -84,14 +84,20 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 
 	// ── HTTP-клиенты downstream-сервисов ─────────────────────────────────────────────────
 
-	// Auth: HTTPClient если AUTH_URL задан явно, иначе Mock (п.11.1 ТЗ).
+	// Auth: LocalValidator — валидирует User JWT локально по shared JWT_SECRET (grpc_kafka_fixes.md §1.1).
+	// Auth Service является gRPC-only и не имеет HTTP-эндпоинта ValidateToken.
+	// MockClient используется только если JWT_SECRET не задан (локальная разработка без токенов).
 	var authClient ports.AuthClient
-	if url := os.Getenv(config.EnvAuthURL); url != "" {
-		log.Printf("auth: using HTTP client → %s", url)
+	if secret := cfg.JWTSecret; secret != "" && secret != "dev-jwt-secret" {
+		log.Printf("auth: using LocalValidator (JWT_SECRET set)")
+		authClient = auth.NewLocalValidator(secret)
+	} else if url := os.Getenv(config.EnvAuthURL); url != "" {
+		// Fallback: HTTP-клиент (для обратной совместимости в dev-окружении с legacy Auth).
+		log.Printf("auth: using HTTP client → %s (legacy fallback)", url)
 		authClient = auth.NewHTTPClient(cfg.Services.AuthURL).
-			WithTimeouts(timeoutStore) // динамический таймаут
+			WithTimeouts(timeoutStore)
 	} else {
-		log.Printf("auth: AUTH_URL not set, using mock client")
+		log.Printf("auth: JWT_SECRET not set, using mock client")
 		authClient = auth.NewMockClient()
 	}
 
@@ -99,7 +105,7 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 	var billingClient ports.BillingClient
 	if url := os.Getenv(config.EnvBillingURL); url != "" {
 		log.Printf("billing: using HTTP client → %s", url)
-		billingClient = billing.NewHTTPClient(cfg.Services.BillingURL).
+		billingClient = billing.NewHTTPClient(cfg.Services.BillingURL, cfg.Services.BillingInternalKey).
 			WithTimeouts(timeoutStore) // п.13.2: динамический таймаут
 	} else {
 		log.Printf("billing: BILLING_URL not set, using mock client")

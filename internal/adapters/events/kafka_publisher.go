@@ -42,34 +42,8 @@ type transactionLogMsg struct {
 	Timestamp string                 `json:"timestamp"`
 }
 
-// generationCompleteMsg — точное соответствие TypeScript-контракту (п.11.2 ТЗ).
-type generationCompleteMsg struct {
-	EventType string                 `json:"eventType"` // "GENERATION_COMPLETE"
-	UserID    string                 `json:"userId"`
-	Channel   string                 `json:"channel"` // "email"
-	Data      generationCompleteData `json:"data"`
-	Timestamp string                 `json:"timestamp"`
-}
-
-type generationCompleteData struct {
-	BarcodeCount int    `json:"barcodeCount"`
-	BuildID      string `json:"buildId"`
-	DownloadURL  string `json:"downloadUrl,omitempty"`
-}
-
-// generationErrorMsg — точное соответствие TypeScript-контракту (п.11.2 ТЗ).
-type generationErrorMsg struct {
-	EventType string              `json:"eventType"` // "GENERATION_ERROR"
-	UserID    string              `json:"userId"`
-	Channel   string              `json:"channel"` // "push"
-	Data      generationErrorData `json:"data"`
-	Timestamp string              `json:"timestamp"`
-}
-
-type generationErrorData struct {
-	Error   string `json:"error"`
-	BuildID string `json:"buildId"`
-}
+// Notification Service ожидает формат {type, payload} (интерфейс KafkaEvent<T>).
+// Старый формат {eventType, userId, channel, data, timestamp} заменён (grpc_kafka_fixes.md §2.1).
 
 // ─── EventPublisher interface ─────────────────────────────────────────────────
 
@@ -129,35 +103,35 @@ func (p *KafkaPublisher) LogTransaction(ctx context.Context, entry domain.Transa
 
 // ─── NotificationsPublisher interface (п.11.2 ТЗ) ────────────────────────────
 
-// SendGenerationComplete публикует GENERATION_COMPLETE в notifications.send (п.11.2 ТЗ).
-// channel=email (TypeScript: channel: 'email').
+// SendGenerationComplete публикует GENERATION_COMPLETE в notif-events (grpc_kafka_fixes.md §2.1).
+// Формат: {type, payload} — KafkaEvent<T> интерфейс Notification Service.
 func (p *KafkaPublisher) SendGenerationComplete(ctx context.Context, req domain.NotificationRequest) error {
-	msg := generationCompleteMsg{
-		EventType: "GENERATION_COMPLETE",
-		UserID:    req.UserID,
-		Channel:   "email",
-		Data: generationCompleteData{
-			BarcodeCount: req.BarcodeCount,
-			BuildID:      req.BuildID,
-			DownloadURL:  req.DownloadURL,
+	msg := map[string]any{
+		"type": "GENERATION_COMPLETE",
+		"payload": map[string]any{
+			"userId":       req.UserID,
+			"channel":      "email",
+			"barcodeCount": req.BarcodeCount,
+			"buildId":      req.BuildID,
+			"downloadUrl":  req.DownloadURL,
+			"timestamp":    time.Now().UTC().Format(time.RFC3339),
 		},
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	return p.producer.Publish(ctx, kafka.TopicNotifications, msg)
 }
 
-// SendGenerationError публикует GENERATION_ERROR в notifications.send (п.11.2 ТЗ).
-// channel=push (TypeScript: channel: 'push').
+// SendGenerationError публикует GENERATION_ERROR в notif-events (grpc_kafka_fixes.md §2.1).
+// Формат: {type, payload} — KafkaEvent<T> интерфейс Notification Service.
 func (p *KafkaPublisher) SendGenerationError(ctx context.Context, req domain.ErrorNotificationRequest) error {
-	msg := generationErrorMsg{
-		EventType: "GENERATION_ERROR",
-		UserID:    req.UserID,
-		Channel:   "push",
-		Data: generationErrorData{
-			Error:   req.Error,
-			BuildID: req.BuildID,
+	msg := map[string]any{
+		"type": "GENERATION_ERROR",
+		"payload": map[string]any{
+			"userId":    req.UserID,
+			"channel":   "push",
+			"error":     req.Error,
+			"buildId":   req.BuildID,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		},
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	return p.producer.Publish(ctx, kafka.TopicNotifications, msg)
 }

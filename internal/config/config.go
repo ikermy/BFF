@@ -13,12 +13,18 @@ const (
 	EnvPort               = "BFF_PORT"
 	EnvInternalServiceJWT = "INTERNAL_SERVICE_JWT"
 	EnvAdminJWT           = "ADMIN_JWT"
+	// EnvJWTSecret — shared secret для локальной валидации User JWT (grpc_kafka_fixes.md §1.1).
+	// Должен совпадать с JWT_SECRET Auth Service, которым подписываются токены пользователей.
+	EnvJWTSecret = "JWT_SECRET"
 
 	// Downstream services
 	EnvBarcodeGenURL = "BARCODEGEN_URL"
 	EnvBillingURL    = "BILLING_URL"
-	EnvAIURL         = "AI_URL"
-	EnvHistoryURL    = "HISTORY_URL"
+	// EnvBillingInternalKey — ключ для x-internal-api-key при вызовах BFF → Billing.
+	// Должен совпадать с INTERNAL_API_KEY в Billing Service (fix_for_services.md Разрыв 1).
+	EnvBillingInternalKey = "BILLING_INTERNAL_API_KEY"
+	EnvAIURL              = "AI_URL"
+	EnvHistoryURL         = "HISTORY_URL"
 
 	// Legacy services (п.17.1 ТЗ)
 	// AUTH_URL используется для HTTP-клиента (п.11.1 ТЗ: validateToken, getUserInfo).
@@ -62,13 +68,14 @@ const (
 // BFF не создаёт HTTP-клиентов для этих сервисов — взаимодействие идёт через Kafka
 // (п.11.2: notifications.send, п.11.3: trans-history.log).
 type Services struct {
-	BarcodeGenURL    string
-	BillingURL       string
-	AIURL            string
-	HistoryURL       string
-	AuthURL          string
-	NotificationsURL string // п.17.1 ТЗ; Kafka-топик: notifications.send
-	TransHistoryURL  string // п.17.1 ТЗ; Kafka-топик: trans-history.log
+	BarcodeGenURL      string
+	BillingURL         string
+	BillingInternalKey string // BILLING_INTERNAL_API_KEY — x-internal-api-key для Billing (fix_for_services.md Разрыв 1)
+	AIURL              string
+	HistoryURL         string
+	AuthURL            string
+	NotificationsURL   string // п.17.1 ТЗ; Kafka-топик: notifications.send
+	TransHistoryURL    string // п.17.1 ТЗ; Kafka-топик: trans-history.log
 }
 
 // Kafka — настройки Kafka.
@@ -108,6 +115,7 @@ type Config struct {
 	Port               string
 	InternalServiceJWT string
 	AdminJWT           string
+	JWTSecret          string // JWT_SECRET — shared secret для локальной JWT-валидации (grpc_kafka_fixes.md §1.1)
 	UnitPrice          float64
 	MaintenanceMode    bool
 	Services           Services
@@ -123,17 +131,19 @@ func Load() Config {
 		Port:               getEnv(EnvPort, "8080"),
 		InternalServiceJWT: getEnv(EnvInternalServiceJWT, "dev-internal-token"),
 		AdminJWT:           getEnv(EnvAdminJWT, "dev-admin-token"),
+		JWTSecret:          getEnv(EnvJWTSecret, "dev-jwt-secret"),
 		UnitPrice:          getEnvFloat(EnvUnitPrice, 0.50),
 		MaintenanceMode:    getEnvBool(EnvMaintenanceMode, false),
 
 		Services: Services{
-			BarcodeGenURL:    getEnv(EnvBarcodeGenURL, "http://barcodegen:8080"),
-			BillingURL:       getEnv(EnvBillingURL, "http://billing:3000"),
-			AIURL:            getEnv(EnvAIURL, "http://ai-service:8080"),
-			HistoryURL:       getEnv(EnvHistoryURL, "http://history:3000"),
-			AuthURL:          getEnv(EnvAuthURL, "http://auth-service:3000"),
-			NotificationsURL: getEnv(EnvNotificationsURL, "http://notifications:3000"),
-			TransHistoryURL:  getEnv(EnvTransHistoryURL, "http://trans-history:3000"),
+			BarcodeGenURL:      getEnv(EnvBarcodeGenURL, "http://barcodegen:8080"),
+			BillingURL:         getEnv(EnvBillingURL, "http://billing:3000"),
+			BillingInternalKey: getEnv(EnvBillingInternalKey, "dev-billing-key"),
+			AIURL:              getEnv(EnvAIURL, "http://ai-service:8080"),
+			HistoryURL:         getEnv(EnvHistoryURL, "http://history:3000"),
+			AuthURL:            getEnv(EnvAuthURL, "http://auth-service:3000"),
+			NotificationsURL:   getEnv(EnvNotificationsURL, "http://notifications:3000"),
+			TransHistoryURL:    getEnv(EnvTransHistoryURL, "http://trans-history:3000"),
 		},
 
 		Kafka: Kafka{

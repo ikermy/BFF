@@ -16,14 +16,16 @@ import (
 // HTTPClient — production-реализация BillingClient (п.7 ТЗ).
 type HTTPClient struct {
 	baseURL      string
+	internalKey  string // x-internal-api-key для InternalApiKeyGuard Billing (fix_for_services.md Разрыв 1)
 	httpClient   *http.Client
 	timeoutStore ports.TimeoutStore // динамический таймаут (п.13.2 ТЗ)
 }
 
-func NewHTTPClient(baseURL string) *HTTPClient {
+func NewHTTPClient(baseURL string, internalKey string) *HTTPClient {
 	return &HTTPClient{
-		baseURL:    baseURL,
-		httpClient: &http.Client{},
+		baseURL:     baseURL,
+		internalKey: internalKey,
+		httpClient:  &http.Client{},
 	}
 }
 
@@ -191,6 +193,9 @@ func (c *HTTPClient) post(ctx context.Context, path string, body any, out any) e
 		return fmt.Errorf("billing: build request %s: %w", path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.internalKey != "" {
+		req.Header.Set("x-internal-api-key", c.internalKey)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

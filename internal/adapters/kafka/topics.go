@@ -15,8 +15,8 @@ const (
 	TopicBarcodeEdited        = "barcode.edited"
 	TopicSagaCompleted        = "billing.saga.completed"
 	TopicSagaPartialCompleted = "billing.saga.partial_completed"
-	TopicNotifications        = "notifications.send"
-	TopicTransHistory         = "trans-history.log"
+	TopicNotifications        = "notif-events"        // исправлено: Notification Service слушает "notif-events" (grpc_kafka_fixes.md §2.1)
+	TopicTransHistory         = "transaction-history" // исправлено: TransHistory Service слушает "transaction-history" (grpc_kafka_fixes.md §2.2)
 	TopicAuthUserInfo         = "auth.user.info"
 )
 
