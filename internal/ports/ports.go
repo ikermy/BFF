@@ -32,6 +32,10 @@ type BarcodeGenClient interface {
 	GeneratePDF417(ctx context.Context, req domain.GeneratePDF417Request) (domain.GeneratePDF417Response, error)
 	// GenerateCode128 — dedicated генерация Code128 с опциями рендеринга (п.12.4 ТЗ).
 	GenerateCode128(ctx context.Context, req domain.GenerateCode128Request) (domain.GenerateCode128Response, error)
+	// GenerateRaw — проксирует «сырую» ANSI-строку от Verification Service в BarcodeGen
+	// POST /internal/v1/generate/raw. Биллинг не списывается (служебная/демо генерация).
+	// capabilities уточнения ТЗ §4 п.5.
+	GenerateRaw(ctx context.Context, req domain.GenerateRawRequest) (domain.GenerateRawResponse, error)
 }
 
 // EventPublisher — порт публикации Kafka-событий (п.10.3, п.14.4, п.8.3 Bulk_Service_TZ).

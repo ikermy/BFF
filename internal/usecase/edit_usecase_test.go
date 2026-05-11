@@ -55,6 +55,9 @@ func (c *countingBarcodeClient) GenerateCode128(_ context.Context, _ domain.Gene
 	c.calls++
 	return domain.GenerateCode128Response{Success: true, BarcodeURL: "https://cdn.example.com/barcodes/test.png"}, nil
 }
+func (c *countingBarcodeClient) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{ImageUrl: "https://cdn.example.com/barcodes/raw_test.png"}, nil
+}
 
 // TestEditUseCase_BillingBlockFails проверяет, что при падении billing.Block:
 // 1. Edit flow немедленно прерывается с BILLING_ERROR 503.

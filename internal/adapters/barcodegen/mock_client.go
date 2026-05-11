@@ -132,3 +132,15 @@ func (c *MockClient) GenerateCode128(_ context.Context, req domain.GenerateCode1
 		},
 	}, nil
 }
+
+// GenerateRaw имитирует POST /internal/v1/generate/raw в BarcodeGen
+// (capabilities уточнения ТЗ §4 п.5).
+// В production: HTTP POST к BARCODEGEN_URL/internal/v1/generate/raw
+//
+//	с телом {normalizedRaw, format}.
+func (c *MockClient) GenerateRaw(_ context.Context, req domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	id := atomic.AddUint64(&c.counter, 1)
+	return domain.GenerateRawResponse{
+		ImageUrl: fmt.Sprintf("https://cdn.example.com/barcodes/raw_%s_%d.png", req.Format, id),
+	}, nil
+}

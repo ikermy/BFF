@@ -173,6 +173,25 @@ func (c *HTTPClient) GenerateCode128(ctx context.Context, req domain.GenerateCod
 	return resp, nil
 }
 
+// GenerateRaw — POST /internal/v1/generate/raw (capabilities уточнения ТЗ §4 п.5).
+// Проксирует «сырую» ANSI-строку от Verification Service в BarcodeGen.
+// Биллинг не списывается — служебная/демо генерация.
+func (c *HTTPClient) GenerateRaw(ctx context.Context, req domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	type rawReqBody struct {
+		NormalizedRaw string `json:"normalizedRaw"`
+		Format        string `json:"format"`
+	}
+	type rawRespBody struct {
+		ImageUrl string `json:"imageUrl"`
+	}
+	body := rawReqBody{NormalizedRaw: req.NormalizedRaw, Format: req.Format}
+	var resp rawRespBody
+	if err := c.post(ctx, "/internal/v1/generate/raw", body, nil, &resp); err != nil {
+		return domain.GenerateRawResponse{}, err
+	}
+	return domain.GenerateRawResponse{ImageUrl: resp.ImageUrl}, nil
+}
+
 // ─── helper ───────────────────────────────────────────────────────────────────
 
 // post выполняет HTTP POST к BarcodeGen Service и декодирует ответ в out.

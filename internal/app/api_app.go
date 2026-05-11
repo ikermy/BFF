@@ -207,7 +207,7 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 	}
 
 	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient)
-	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase)
+	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase, revisionStore, revisionSchemaCase, barcodeClient)
 	adminHandler := gintransport.NewAdminHandler(topUpBonusStore, kafkaTopicsStore, timeoutStore, revisionStore)
 	router := gintransport.NewRouter(
 		gintransport.Handlers{API: apiHandler, Internal: internalHandler, Admin: adminHandler},

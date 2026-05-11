@@ -78,6 +78,9 @@ func (c *failingBarcodeClient) GenerateCode128(_ context.Context, _ domain.Gener
 	}
 	return domain.GenerateCode128Response{Success: true, BarcodeURL: item.URL, Format: item.Format}, nil
 }
+func (c *failingBarcodeClient) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{}, nil
+}
 
 type retryThenSuccessBarcodeClient struct {
 	baseBarcodeClient
@@ -104,6 +107,9 @@ func (c *retryThenSuccessBarcodeClient) GenerateCode128(_ context.Context, _ dom
 	}
 	return domain.GenerateCode128Response{Success: true, BarcodeURL: fmt.Sprintf("https://cdn.example.com/barcodes/code128_retry_%d.png", call), Format: "code128"}, nil
 }
+func (c *retryThenSuccessBarcodeClient) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{}, nil
+}
 
 type nonRetryableBarcodeClient struct {
 	baseBarcodeClient
@@ -118,6 +124,9 @@ func (c *nonRetryableBarcodeClient) GeneratePDF417(_ context.Context, _ domain.G
 func (c *nonRetryableBarcodeClient) GenerateCode128(_ context.Context, _ domain.GenerateCode128Request) (domain.GenerateCode128Response, error) {
 	c.count.Add(1)
 	return domain.GenerateCode128Response{}, errors.New("barcodegen: status 400: invalid payload")
+}
+func (c *nonRetryableBarcodeClient) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{}, nil
 }
 
 func TestGenerateUseCase_PartialRequiresConfirmation(t *testing.T) {

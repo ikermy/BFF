@@ -84,7 +84,7 @@ func makeHandlers(t *testing.T, topupPath string) (gintransport.Handlers, ports.
 	bulkConsumer := kafkaadapter.NewMockConsumer(bulkHandler.Handle, 64)
 
 	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient)
-	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase)
+	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase, revisionStore, revisionSchemaCase, barcodeClient)
 	adminHandler := gintransport.NewAdminHandler(topupStore, kafkaTopicsStore, timeoutStore, revisionStore)
 
 	return gintransport.Handlers{API: apiHandler, Internal: internalHandler, Admin: adminHandler}, idempotencyStore

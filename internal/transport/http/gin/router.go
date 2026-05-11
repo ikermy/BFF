@@ -119,6 +119,10 @@ func NewRouter(
 			IdempotencyMiddleware(idempotency, enableIdempotency),
 			h.Internal.BlockBatch,
 		)
+		// capabilities уточнения ТЗ §4: эндпоинты для Verification Service
+		internal.GET("/revisions", h.Internal.ListRevisions)
+		internal.GET("/revisions/:revision/schema", h.Internal.GetRevisionSchema)
+		internal.POST("/v1/capabilities/generate-raw", h.Internal.GenerateRaw)
 	}
 
 	return r

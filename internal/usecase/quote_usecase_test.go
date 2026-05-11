@@ -242,6 +242,9 @@ func (c *simpleBarcodeClientForQuote) GeneratePDF417(_ context.Context, _ domain
 func (c *simpleBarcodeClientForQuote) GenerateCode128(_ context.Context, _ domain.GenerateCode128Request) (domain.GenerateCode128Response, error) {
 	return domain.GenerateCode128Response{}, nil
 }
+func (c *simpleBarcodeClientForQuote) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{}, nil
+}
 
 func newMockEventsForQuote() ports.EventPublisher {
 	return &simpleEventsForQuote{}

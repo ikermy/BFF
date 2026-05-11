@@ -150,28 +150,7 @@ func (h *APIHandler) GetRevisionSchema(c *gin.Context) {
 
 // ListRevisions — GET /api/v1/revisions (список доступных ревизий для фронтенда).
 func (h *APIHandler) ListRevisions(c *gin.Context) {
-	configs, err := h.revisionStore.ListConfigs(c.Request.Context())
-	if err != nil {
-		RespondError(c, err)
-		return
-	}
-
-	type revisionItem struct {
-		Name        string `json:"name"`
-		DisplayName string `json:"displayName"`
-		Enabled     bool   `json:"enabled"`
-	}
-	items := make([]revisionItem, 0, len(configs))
-	for _, cfg := range configs {
-		if cfg.Enabled {
-			items = append(items, revisionItem{
-				Name:        cfg.Name,
-				DisplayName: cfg.DisplayName,
-				Enabled:     cfg.Enabled,
-			})
-		}
-	}
-	c.JSON(http.StatusOK, gin.H{"revisions": items})
+	respondRevisionList(c, h.revisionStore)
 }
 
 // BulkWake — POST /api/v1/bulk/wake (п.14.6 ТЗ).

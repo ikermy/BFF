@@ -131,3 +131,18 @@ type GenerateCode128Response struct {
 	Format     string          `json:"format"`
 	Metadata   BarcodeMetadata `json:"metadata"`
 }
+
+// ─── capabilities уточнения ТЗ §4 ────────────────────────────────────────────
+
+// GenerateRawRequest — входной контракт от Verification Service.
+// Принимается BFF на POST /internal/capabilities/generate-raw
+// и проксируется в BarcodeGen POST /internal/v1/generate/raw.
+type GenerateRawRequest struct {
+	NormalizedRaw string `json:"normalizedRaw" binding:"required"`
+	Format        string `json:"format" binding:"required"` // "pdf417"
+}
+
+// GenerateRawResponse — ответ BFF в Verification Service.
+type GenerateRawResponse struct {
+	ImageUrl string `json:"imageUrl"`
+}
