@@ -1,6 +1,7 @@
 package gintransport
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -85,7 +86,9 @@ func GetUserInfo(c *gin.Context) (domain.UserInfo, bool) {
 }
 
 // ServiceJWTMiddleware проверяет Service Token для /internal/* (п.16.1 ТЗ).
+// Сравнение через subtle.ConstantTimeCompare предотвращает Timing Attack (BFF_Final_Status_Report.md п.4).
 func ServiceJWTMiddleware(expectedToken string) gin.HandlerFunc {
+	expected := []byte(expectedToken)
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
@@ -93,7 +96,7 @@ func ServiceJWTMiddleware(expectedToken string) gin.HandlerFunc {
 			return
 		}
 		token := strings.TrimPrefix(header, "Bearer ")
-		if token != expectedToken {
+		if subtle.ConstantTimeCompare([]byte(token), expected) != 1 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid service token"})
 			return
 		}
@@ -102,7 +105,9 @@ func ServiceJWTMiddleware(expectedToken string) gin.HandlerFunc {
 }
 
 // AdminJWTMiddleware проверяет Admin JWT для /admin/* (п.16.1 ТЗ).
+// Сравнение через subtle.ConstantTimeCompare предотвращает Timing Attack (BFF_Final_Status_Report.md п.4).
 func AdminJWTMiddleware(expectedToken string) gin.HandlerFunc {
+	expected := []byte(expectedToken)
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
@@ -110,7 +115,7 @@ func AdminJWTMiddleware(expectedToken string) gin.HandlerFunc {
 			return
 		}
 		token := strings.TrimPrefix(header, "Bearer ")
-		if token != expectedToken {
+		if subtle.ConstantTimeCompare([]byte(token), expected) != 1 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid admin token"})
 			return
 		}

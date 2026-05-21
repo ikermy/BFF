@@ -82,6 +82,21 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		_ = deferShutdown
 	}
 
+	// EditLocker: RedisEditLocker если REDIS_URL задан, иначе MemoryEditLocker (п.10.1 ТЗ).
+	// Защищает бесплатное редактирование от Race Condition
+	var editLocker ports.EditLocker
+	if url := os.Getenv(config.EnvRedisURL); url != "" {
+		log.Printf("edit locker: using Redis → %s", url)
+		redisLocker, err := idempotency.NewRedisEditLocker(cfg.Redis.URL)
+		if err != nil {
+			log.Fatalf("edit locker: redis init failed: %v", err)
+		}
+		editLocker = redisLocker
+	} else {
+		log.Printf("edit locker: REDIS_URL not set, using in-memory locker")
+		editLocker = idempotency.NewMemoryEditLocker()
+	}
+
 	// ── HTTP-клиенты downstream-сервисов ─────────────────────────────────────────────────
 
 	// Auth: LocalValidator — валидирует User JWT локально по shared JWT_SECRET (grpc_kafka_fixes.md §1.1).
@@ -189,7 +204,8 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 	if cfg.Features.EnableNotifications {
 		generateCase = generateCase.WithNotifications(notificationsPublisher)
 	}
-	editCase := usecase.NewEditUseCase(billingClient, barcodeClient, historyClient, eventPublisher)
+	editCase := usecase.NewEditUseCase(billingClient, barcodeClient, historyClient, eventPublisher).
+		WithEditLocker(editLocker)
 	revisionSchemaCase := usecase.NewRevisionSchemaUseCase(revisionStore)
 
 	bulkHandler := kafkatransport.NewBulkJobHandler(generateCase, eventPublisher)

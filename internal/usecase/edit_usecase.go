@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,16 +13,19 @@ import (
 // EditUseCase — оркестрирует бесплатное редактирование баркода (п.10.1 ТЗ).
 //
 // Flow:
+//  0. TryLock → Redis SetNX (edit-lock:{barcodeID}, 30s): атомарная защита от Race Condition
 //  1. CheckFreeEdit → History Service: проверяем editFlag
 //  2. Если editFlag=true → 402 (право уже использовано)
 //  3. Block {units:0} → Billing (бесплатная блокировка)
 //  4. Generate → BarcodeGen (перегенерация с новым значением поля)
 //  5. PublishBarcodeEdited → Kafka: Consumer ставит editFlag=true и обновляет imageUrl
+//  6. Unlock → Redis DEL (edit-lock:{barcodeID})
 type EditUseCase struct {
 	billing    ports.BillingClient
 	barcodeGen ports.BarcodeGenClient
 	history    ports.HistoryClient
 	events     ports.EventPublisher
+	locker     ports.EditLocker // nil в тестах без Redis; SetNX-лок против Race Condition
 }
 
 func NewEditUseCase(
@@ -38,6 +42,13 @@ func NewEditUseCase(
 	}
 }
 
+// WithEditLocker подключает EditLocker для защиты от Race Condition (п.10.1 ТЗ).
+// В production — RedisEditLocker; в dev/test — MemoryEditLocker или nil (лок отключён).
+func (u *EditUseCase) WithEditLocker(locker ports.EditLocker) *EditUseCase {
+	u.locker = locker
+	return u
+}
+
 // Execute — выполняет бесплатное редактирование баркода.
 // userID нужен для billing.Block (units=0 — бесплатная блокировка, только регистрация саги).
 func (u *EditUseCase) Execute(ctx context.Context, userID, barcodeID string, req domain.EditRequest) (domain.EditResponse, error) {
@@ -46,6 +57,26 @@ func (u *EditUseCase) Execute(ctx context.Context, userID, barcodeID string, req
 	}
 	if req.Field == "" {
 		return domain.EditResponse{}, domain.NewValidationError("field is required")
+	}
+
+	// Шаг 0: атомарный лок для предотвращения Race Condition (BFF_Final_Status_Report.md п.3).
+	// Без лока злоумышленник может отправить N параллельных запросов с разными
+	// Idempotency-Key и использовать бесплатное редактирование N раз вместо 1.
+	if u.locker != nil {
+		acquired, lockErr := u.locker.TryLock(ctx, barcodeID)
+		if lockErr != nil {
+			return domain.EditResponse{}, domain.NewBillingError(
+				fmt.Errorf("edit lock: %w", lockErr),
+			)
+		}
+		if !acquired {
+			return domain.EditResponse{}, &domain.AppError{
+				Code:       domain.ErrCodeDuplicateRequest,
+				HTTPStatus: 409,
+				Message:    "edit already in progress for barcode " + barcodeID,
+			}
+		}
+		defer func() { _ = u.locker.Unlock(ctx, barcodeID) }()
 	}
 
 	// Шаг 1: проверить право на бесплатное редактирование

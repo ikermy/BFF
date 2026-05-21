@@ -155,3 +155,17 @@ type IdempotencyStore interface {
 	// повторить запрос с тем же ключом. Без этого маркер блокирует ретраи до TTL.
 	Delete(ctx context.Context, key string) error
 }
+
+// EditLocker — порт атомарной блокировки бесплатного редактирования (п.10.1 ТЗ).
+// Предотвращает Race Condition: окно между CheckFreeEdit и PublishBarcodeEdited
+// закрывается атомарным SetNX-локом на время обработки запроса.
+// В production — Redis SetNX; в dev/test — in-memory мьютекс.
+type EditLocker interface {
+	// TryLock пытается захватить эксклюзивную блокировку для barcodeID.
+	// Возвращает true если блокировка захвачена (первый вызов для данного ID).
+	// Возвращает false если barcodeID уже заблокирован параллельным запросом.
+	TryLock(ctx context.Context, barcodeID string) (bool, error)
+	// Unlock освобождает блокировку для barcodeID.
+	// Вызывается после завершения обработки (успех или ошибка).
+	Unlock(ctx context.Context, barcodeID string) error
+}

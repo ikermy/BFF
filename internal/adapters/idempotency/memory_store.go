@@ -68,6 +68,8 @@ func (s *MemoryStore) Get(_ context.Context, key string) ([]byte, bool, error) {
 // Reserve резервирует ключ (SetNX) — соответствует checkOrSet(key, null) из ТЗ.
 // Возвращает true если ключ успешно зарезервирован (первый запрос).
 // Возвращает false если ключ уже существует (параллельный или повторный запрос).
+// Использует shortTTL вместо s.ttl (24ч): при перезапуске in-process
+// маркер истекает быстро, не блокируя клиента (Zombie Lock fix).
 func (s *MemoryStore) Reserve(_ context.Context, key string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,8 +78,8 @@ func (s *MemoryStore) Reserve(_ context.Context, key string) (bool, error) {
 		// Ключ уже существует и не просрочен — не резервируем
 		return false, nil
 	}
-	// Записываем in-flight маркер с nil body
-	s.entries[key] = entry{body: nil, expiresAt: time.Now().Add(s.ttl)}
+	// Записываем in-flight маркер с коротким TTL
+	s.entries[key] = entry{body: nil, expiresAt: time.Now().Add(shortTTL)}
 	return true, nil
 }
 

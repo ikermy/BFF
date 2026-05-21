@@ -12,15 +12,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// maxIdempotencyBodySize — максимальный размер тела ответа, сохраняемого в IdempotencyStore.
+// Защита от OOM: при больших ответах (файлы, крупные batch-результаты) bytes.Buffer
+// не накапливается безгранично. При превышении лимита ответ не кэшируется,
+// in-flight маркер удаляется — клиент может повторить запрос немедленно.
+// OOM fix: BFF_Final_Status_Report.md Техдолг п.5.
+const maxIdempotencyBodySize = 1 << 20 // 1 МБ
+
 // responseCapture — обёртка над gin.ResponseWriter для захвата тела ответа.
 type responseCapture struct {
 	gin.ResponseWriter
-	body   bytes.Buffer
-	status int
+	body       bytes.Buffer
+	status     int
+	overflowed bool // true если ответ превысил maxIdempotencyBodySize — не кэшируем
 }
 
 func (r *responseCapture) Write(b []byte) (int, error) {
-	r.body.Write(b)
+	if !r.overflowed {
+		if r.body.Len()+len(b) > maxIdempotencyBodySize {
+			// Превышен лимит — помечаем как overflowed и не кэшируем,
+			// но ответ клиенту продолжаем отдавать в штатном режиме.
+			r.overflowed = true
+		} else {
+			r.body.Write(b)
+		}
+	}
 	return r.ResponseWriter.Write(b)
 }
 
@@ -99,10 +115,10 @@ func IdempotencyMiddleware(store ports.IdempotencyStore, enableIdempotency ...bo
 		c.Next()
 
 		// Фаза 2b: сохраняем только успешные ответы (checkOrSet(key, response) из ТЗ).
-		// При ошибке (не-2xx) или пустом теле — удаляем in-flight маркер:
-		// клиент должен иметь возможность ретраить с тем же ключом немедленно,
-		// а не ждать истечения TTL, постоянно получая 409 REQUEST_IN_FLIGHT.
-		if capture.Status() >= 200 && capture.Status() < 300 && capture.body.Len() > 0 {
+		// При ошибке (не-2xx), пустом теле или превышении maxIdempotencyBodySize —
+		// удаляем in-flight маркер: клиент должен иметь возможность ретраить с тем же
+		// ключом немедленно, а не ждать истечения TTL, постоянно получая 409 REQUEST_IN_FLIGHT.
+		if capture.Status() >= 200 && capture.Status() < 300 && capture.body.Len() > 0 && !capture.overflowed {
 			_ = store.Set(c.Request.Context(), key, capture.body.Bytes())
 		} else {
 			_ = store.Delete(c.Request.Context(), key)

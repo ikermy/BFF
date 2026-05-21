@@ -13,6 +13,12 @@ import (
 // Выбран \x00 чтобы отличаться от любого валидного JSON-тела.
 const inFlightMarker = "\x00"
 
+// shortTTL — короткий TTL
+// При крэше Pod'а (OOM, SIGKILL) Redis автоматически снимет блокировку через shortTTL.
+// Полный TTL (24ч) применяется только к завершённым успешным ответам (Set).
+// Zombie Lock fix: BFF_Final_Status_Report.md Техдолг п.7.
+const shortTTL = 2 * time.Minute
+
 // keyPrefix — префикс ключей в Redis (п.14.1 ТЗ).
 // TypeScript: `idempotency:${key}`
 const keyPrefix = "idempotency:"
@@ -65,10 +71,12 @@ func (s *RedisStore) Get(ctx context.Context, key string) ([]byte, bool, error) 
 // Возвращает true если ключ успешно зарезервирован (первый запрос).
 // Возвращает false если ключ уже существует (параллельный или повторный запрос).
 // TypeScript: redis.set(key, JSON.stringify(null), 'EX', ttl) — здесь эквивалент через NX.
+// Использует shortTTL (2 мин), а не s.ttl (24ч): при крэше Pod'а маркер снимается
+// через 2 минуты, а не блокирует клиента на сутки (Zombie Lock fix).
 func (s *RedisStore) Reserve(ctx context.Context, key string) (bool, error) {
 	res, err := s.client.SetArgs(ctx, keyPrefix+key, inFlightMarker, redis.SetArgs{
 		Mode: "NX",
-		TTL:  s.ttl,
+		TTL:  shortTTL,
 	}).Result()
 	if err != nil && err != redis.Nil {
 		return false, fmt.Errorf("idempotency: redis set nx: %w", err)

@@ -1,10 +1,12 @@
 package domain
 
 // GenerateRequest — тело запроса POST /api/v1/barcode/generate (п.12.2 ТЗ).
+// binding:"required" на Revision и Units дублирует проверки usecase на уровне хендлера,
+// возвращая единообразный VALIDATION_ERROR 400 до входа в бизнес-логику.
 type GenerateRequest struct {
-	Revision       string         `json:"revision"`
+	Revision       string         `json:"revision"     binding:"required"`
 	BarcodeType    string         `json:"barcodeType"`
-	Units          int            `json:"units"`
+	Units          int            `json:"units"        binding:"required,min=1"`
 	Confirmed      bool           `json:"confirmed"`
 	BuildID        string         `json:"buildId"`
 	BatchID        string         `json:"batchId"`
