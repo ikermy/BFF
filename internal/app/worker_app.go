@@ -130,7 +130,7 @@ func BuildWorkerApp(cfg config.Config) *WorkerApp {
 	if brokers := os.Getenv(config.EnvKafkaBrokers); brokers != "" {
 		log.Printf("worker bulk.tasks: using real Kafka consumer → brokers=%s group=%s",
 			brokers, cfg.Kafka.GroupID)
-		consumer = kafkaadapter.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.GroupID, handler.Handle)
+		consumer = kafkaadapter.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.GroupID, handler.Handle, kafkaProducer)
 	} else {
 		log.Printf("worker bulk.tasks: KAFKA_BROKERS not set, using mock consumer")
 		consumer = kafkaadapter.NewMockConsumer(handler.Handle, 256)

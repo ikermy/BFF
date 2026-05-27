@@ -11,6 +11,7 @@ import (
 const (
 	TopicBulkJob              = "bulk.tasks" // п.14 ТЗ
 	TopicBulkResult           = "bulk.result"
+	TopicBulkTasksDLQ         = "bulk.tasks.dlq" // Dead Letter Queue для bulk.tasks (DLQ)
 	TopicBarcodeGenerated     = "barcode.generated"
 	TopicBarcodeEdited        = "barcode.edited"
 	TopicSagaCompleted        = "billing.saga.completed"
@@ -40,6 +41,7 @@ func (s *TopicStore) List(_ context.Context) ([]domain.KafkaTopic, error) {
 		// Bulk Service (п.14.6 ТЗ)
 		{Name: TopicBulkJob, Enabled: true},
 		{Name: TopicBulkResult, Enabled: true},
+		{Name: TopicBulkTasksDLQ, Enabled: true},
 		// Legacy интеграции (п.11.2, п.11.3, п.11.4 ТЗ)
 		{Name: TopicNotifications, Enabled: true},
 		{Name: TopicTransHistory, Enabled: true},
