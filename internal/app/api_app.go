@@ -9,6 +9,7 @@ import (
 	aiadapter "github.com/ikermy/BFF/internal/adapters/ai"
 	"github.com/ikermy/BFF/internal/adapters/auth"
 	"github.com/ikermy/BFF/internal/adapters/barcodegen"
+	"github.com/ikermy/BFF/internal/adapters/barcodegen/legacy"
 	"github.com/ikermy/BFF/internal/adapters/billing"
 	"github.com/ikermy/BFF/internal/adapters/events"
 	"github.com/ikermy/BFF/internal/adapters/history"
@@ -127,12 +128,27 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		billingClient = billing.NewMockClient(cfg.UnitPrice)
 	}
 
-	// BarcodeGen: HTTPClient если BARCODEGEN_URL задан явно, иначе Mock (п.8 ТЗ).
+	// BarcodeGen: выбор реализации по BARCODEGEN_MODE (отчёт §4.1).
+	//   native — http_client.go, контракт ТЗ (включим, когда BarcodeGen обновят).
+	//   legacy — ACL-адаптер под реальный BarcodeGen /api/v1/barcodes/*.
+	// Если BARCODEGEN_URL не задан — MockClient (dev/test).
 	var barcodeClient ports.BarcodeGenClient
 	if url := os.Getenv(config.EnvBarcodeGenURL); url != "" {
-		log.Printf("barcodegen: using HTTP client → %s", url)
-		barcodeClient = barcodegen.NewHTTPClient(cfg.Services.BarcodeGenURL, cfg.Timeouts.BarcodeGen).
-			WithTimeouts(timeoutStore) // п.13.2: динамический таймаут
+		switch cfg.BarcodeGenMode {
+		case "legacy":
+			log.Printf("barcodegen: using legacy ACL adapter → %s (mode=legacy)", url)
+			legacyClient := legacy.NewLegacyClient(cfg.Services.BarcodeGenURL, cfg.JWTAccessSecret, cfg.BarcodeGenRawURL, cfg.Timeouts.BarcodeGen).
+				WithIdempotencyStore(idempotencyStore) // A6: дедупликация ретраев генерации
+			if cfg.ArtifactDir != "" {
+				log.Printf("barcodegen: artifact relocation → dir=%s public=%s", cfg.ArtifactDir, cfg.ArtifactPublicBase)
+				legacyClient = legacyClient.WithArtifactStore(legacy.NewLocalArtifactStore(cfg.ArtifactDir, cfg.ArtifactPublicBase))
+			}
+			barcodeClient = legacyClient
+		default:
+			log.Printf("barcodegen: using HTTP client (native, ТЗ-контракт) → %s", url)
+			barcodeClient = barcodegen.NewHTTPClient(cfg.Services.BarcodeGenURL, cfg.Timeouts.BarcodeGen).
+				WithTimeouts(timeoutStore) // п.13.2: динамический таймаут
+		}
 	} else {
 		log.Printf("barcodegen: BARCODEGEN_URL not set, using mock client")
 		barcodeClient = barcodegen.NewMockClient()
@@ -189,6 +205,20 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		log.Printf("warn: cannot load revisions from yaml: %v (using defaults)", err)
 	}
 
+	// B1: засеваем whitelist пар ревизий для legacy-адаптера из конфигов, которые знает BFF.
+	// Без этого resolveRevision валидирует только формат, а не реальную поддержку пары.
+	if cfg.BarcodeGenMode == "legacy" {
+		if configs, err := revisionStore.ListConfigs(parentCtx); err == nil {
+			names := make([]string, 0, len(configs))
+			for _, c := range configs {
+				names = append(names, c.Name)
+			}
+			legacy.SyncSupportedRevisionsFromConfigs(names)
+		} else {
+			log.Printf("warn: cannot list revisions to seed barcodegen whitelist: %v", err)
+		}
+	}
+
 	// ── Use cases ─────────────────────────────────────────────────────────────────────────
 
 	quoteCase := usecase.NewQuoteUseCase(billingClient).
@@ -216,7 +246,7 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 	if brokers := os.Getenv(config.EnvKafkaBrokers); brokers != "" {
 		log.Printf("api bulk.tasks: using real Kafka consumer → brokers=%s group=%s",
 			brokers, cfg.Kafka.GroupID)
-		bulkConsumer = kafkaadapter.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.GroupID, bulkHandler.Handle)
+		bulkConsumer = kafkaadapter.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.GroupID, bulkHandler.Handle, nil)
 	} else {
 		log.Printf("api bulk.tasks: KAFKA_BROKERS not set, using mock consumer")
 		bulkConsumer = kafkaadapter.NewMockConsumer(bulkHandler.Handle, 256)
@@ -235,6 +265,13 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		cfg.Features.EnableIdempotency,
 		cfg.MaintenanceMode,
 	)
+
+	// D2 этап 2: статическая раздача переложенных PNG по /artifacts, если задан
+	// ARTIFACT_DIR. Позволяет ARTIFACT_PUBLIC_URL указывать на сам BFF (тестовый режим).
+	if cfg.ArtifactDir != "" {
+		log.Printf("artifact: serving /artifacts from %q", cfg.ArtifactDir)
+		router.Static("/artifacts", cfg.ArtifactDir)
+	}
 
 	app := &APIApp{
 		server:   gintransport.NewServer(cfg.Port, router),

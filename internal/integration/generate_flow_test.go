@@ -467,3 +467,24 @@ func TestIntegration_FreeEditFlow_AlreadyUsed(t *testing.T) {
 		t.Errorf("expected no barcode.edited event on failed edit, got %d", len(edited))
 	}
 }
+
+// TestIntegration_BillingCreditsStub — billing-stub для встроенного биллинга BarcodeGen
+// (D1, отчёт §4.3). Должен отвечать {credits: >0} на GET /internal/v1/billing/check/credits
+// БЕЗ сервисного токена BFF (BarcodeGen присылает пользовательский JWT).
+func TestIntegration_BillingCreditsStub(t *testing.T) {
+	env := newTestEnv(t, 1.0)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/internal/v1/billing/check/credits", nil)
+	// Без Authorization вообще — маршрут вне защищённой /internal-группы.
+	env.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("billing stub: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	resp := mustDecodeJSON(t, w)
+	credits, _ := resp["credits"].(float64)
+	if credits <= 0 {
+		t.Errorf("billing stub: expected credits > 0, got %v", resp["credits"])
+	}
+}

@@ -365,7 +365,7 @@ Dev-режим для локальной разработки с mock downstream
 Используйте отдельный dev override, который зануляет внешние service URL и тем самым переключает приложение на встроенные mock-адаптеры.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.yml -f dev.yml up -d --build
 ```
 
 > Базовый `docker-compose.yml` содержит service/legacy URL согласно ТЗ.
@@ -569,13 +569,13 @@ make test
 ### Проверка статуса контейнеров
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.observability.yml ps
+docker compose -f docker-compose.yml -f observability.yml ps
 ```
 
 ### Просмотр логов
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f --tail=200
+docker compose -f docker-compose.yml -f observability.yml logs -f --tail=200
 ```
 
 ### Проверка health
@@ -677,7 +677,7 @@ go test ./... -count=1
 ### Вариант 1 — только приложение
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.yml -f dev.yml up -d --build
 ```
 
 После этого доступны:
@@ -688,7 +688,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ### Вариант 2 — приложение + observability
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+docker compose -f docker-compose.yml -f observability.yml up -d --build
 ```
 
 После этого доступны:

@@ -17,6 +17,24 @@ const (
 	// Должен совпадать с JWT_SECRET Auth Service, которым подписываются токены пользователей.
 	EnvJWTSecret = "JWT_SECRET"
 
+	// EnvJWTAccessSecret — секрет для минта сервисных JWT в legacy-адаптере BarcodeGen.
+	// Должен совпадать с JWT_ACCESS_SECRET BarcodeGen (имя env в jwt.strategy.ts), которым
+	// BarcodeGen подписывает/проверяет свои токены (AuthGuard('jwt'), reads payload.id).
+	// Если не задан — fallback на JWT_SECRET (одноключевое окружение, нулевая доп. настройка).
+	EnvJWTAccessSecret = "JWT_ACCESS_SECRET"
+
+	// EnvBarcodeGenMode — выбор реализации BarcodeGenClient: "native" (http_client.go по ТЗ)
+	// или "legacy" (ACL-адаптер под реальный BarcodeGen /api/v1/barcodes/*). По умолчанию native.
+	EnvBarcodeGenMode = "BARCODEGEN_MODE"
+
+	// EnvBarcodeGenRawURL — базовый URL микро-sidecar barcode-raw-svc для GenerateRaw
+	// (в ядре BarcodeGen raw-функции нет, отчёт §4.2 п.7).
+	EnvBarcodeGenRawURL = "BARCODEGEN_RAW_URL"
+
+	// D2, этап 2: перекладка сгенерированных PNG в стабильное хранилище.
+	EnvArtifactDir        = "ARTIFACT_DIR"        // куда складывать артефакты (общий volume / S3 mount)
+	EnvArtifactPublicBase = "ARTIFACT_PUBLIC_URL" // базовый публичный URL для артефактов
+
 	// Downstream services
 	EnvBarcodeGenURL = "BARCODEGEN_URL"
 	EnvBillingURL    = "BILLING_URL"
@@ -116,6 +134,11 @@ type Config struct {
 	InternalServiceJWT string
 	AdminJWT           string
 	JWTSecret          string // JWT_SECRET — shared secret для локальной JWT-валидации (grpc_kafka_fixes.md §1.1)
+	JWTAccessSecret    string // JWT_ACCESS_SECRET — секрет минта сервисных JWT для legacy BarcodeGen (fallback JWT_SECRET)
+	BarcodeGenMode     string // BARCODEGEN_MODE — "native" | "legacy"
+	BarcodeGenRawURL   string // BARCODEGEN_RAW_URL — barcode-raw-svc для GenerateRaw
+	ArtifactDir        string // ARTIFACT_DIR — куда перекладывать PNG (D2 этап 2)
+	ArtifactPublicBase string // ARTIFACT_PUBLIC_URL — публичный base URL артефактов
 	UnitPrice          float64
 	MaintenanceMode    bool
 	Services           Services
@@ -132,6 +155,11 @@ func Load() Config {
 		InternalServiceJWT: getEnv(EnvInternalServiceJWT, "dev-internal-token"),
 		AdminJWT:           getEnv(EnvAdminJWT, "dev-admin-token"),
 		JWTSecret:          getEnv(EnvJWTSecret, "dev-jwt-secret"),
+		JWTAccessSecret:    getEnv(EnvJWTAccessSecret, getEnv(EnvJWTSecret, "dev-jwt-secret")),
+		BarcodeGenMode:     getEnv(EnvBarcodeGenMode, "native"),
+		BarcodeGenRawURL:   getEnv(EnvBarcodeGenRawURL, ""),
+		ArtifactDir:        getEnv(EnvArtifactDir, ""),
+		ArtifactPublicBase: getEnv(EnvArtifactPublicBase, ""),
 		UnitPrice:          getEnvFloat(EnvUnitPrice, 0.50),
 		MaintenanceMode:    getEnvBool(EnvMaintenanceMode, false),
 

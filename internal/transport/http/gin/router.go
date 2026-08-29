@@ -125,5 +125,10 @@ func NewRouter(
 		internal.POST("/v1/capabilities/generate-raw", h.Internal.GenerateRaw)
 	}
 
+	// D1 (отчёт §4.3): billing-stub для встроенного биллинга BarcodeGen.
+	// Регистрируется ВНЕ защищённой /internal-группы: BarcodeGen присылает сюда
+	// пользовательский JWT (canBuy(data.token)), а не сервисный токен BFF.
+	r.GET("/internal/v1/billing/check/credits", h.Internal.CheckCreditsStub)
+
 	return r
 }

@@ -1,26 +1,69 @@
+# =============================================================================
+# docker-compose.prod.yml — prod-оверлей поверх docker-compose.yml
+# =============================================================================
+#
+# Использование:
+#   DOMAIN=example.com docker compose \
+#     -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Что делает:
+#   - Переопределяет сервис envoy на prod-конфиг (Let's Encrypt, watched_directory),
+#     подставляя DOMAIN вместо DOMAIN_PLACEHOLDER в envoy.prod.yaml.
+#   - Добавляет acme_http (nginx) — отдаёт ACME challenge.
+#   - Добавляет certbot — фоновое автообновление сертификатов (каждые 12ч).
+#
+# Первоначальное получение сертификата: ./envoy/certbot-init.sh <domain> <email>
+# =============================================================================
+
 services:
-  bff:
-    environment:
-      BARCODEGEN_URL: "${BARCODEGEN_URL:-http://barcodegen:8080}"
-      BILLING_URL: "${BILLING_URL:-http://billing:3000}"
-      AI_URL: "${AI_URL:-http://ai-service:8080}"
-      HISTORY_URL: "${HISTORY_URL:-http://history:3000}"
-      AUTH_URL: "${AUTH_URL:-http://auth-service:3000}"
-      NOTIFICATIONS_URL: "${NOTIFICATIONS_URL:-http://notifications:3000}"
-      TRANS_HISTORY_URL: "${TRANS_HISTORY_URL:-http://trans-history:3000}"
-      KAFKA_GROUP_ID: "${KAFKA_GROUP_ID:-bff-bulk-worker}"
-      ENABLE_LEGACY_AUTH: "${ENABLE_LEGACY_AUTH:-true}"
-      ENABLE_NOTIFICATIONS: "${ENABLE_NOTIFICATIONS:-true}"
-      ENABLE_IDEMPOTENCY: "${ENABLE_IDEMPOTENCY:-true}"
-      ENABLE_PARTIAL_SUCCESS: "${ENABLE_PARTIAL_SUCCESS:-true}"
-      MAINTENANCE_MODE: "${MAINTENANCE_MODE:-false}"
 
-  worker:
+  envoy:
+    image: envoyproxy/envoy:v1.32-latest
+    container_name: barcode_envoy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: >
+      /bin/sh -c 'sed "s/DOMAIN_PLACEHOLDER/$${DOMAIN}/g"
+        /etc/envoy/envoy.prod.yaml.template > /etc/envoy/envoy.yaml
+        && envoy -c /etc/envoy/envoy.yaml'
     environment:
-      BARCODEGEN_URL: "${BARCODEGEN_URL:-http://barcodegen:8080}"
-      BILLING_URL: "${BILLING_URL:-http://billing:3000}"
-      AI_URL: "${AI_URL:-http://ai-service:8080}"
-      KAFKA_GROUP_ID: "${KAFKA_GROUP_ID:-bff-bulk-worker}"
-      ENABLE_NOTIFICATIONS: "${ENABLE_NOTIFICATIONS:-true}"
-      ENABLE_PARTIAL_SUCCESS: "${ENABLE_PARTIAL_SUCCESS:-true}"
+      DOMAIN: "${DOMAIN:?DOMAIN required (e.g. example.com)}"
+    volumes:
+      - ./envoy/envoy.prod.yaml:/etc/envoy/envoy.prod.yaml.template:ro
+      - barcode_certbot_certs:/etc/letsencrypt:ro
+      - barcode_certbot_www:/var/www/certbot:ro
+    depends_on:
+      - bff
+    networks:
+      - barcode-shared
 
+  # nginx — отдаёт ACME challenge файлы certbot (webroot)
+  acme_http:
+    image: nginx:1.27-alpine
+    container_name: barcode_acme_http
+    restart: unless-stopped
+    volumes:
+      - barcode_certbot_www:/usr/share/nginx/html:ro
+    networks:
+      - barcode-shared
+
+  # certbot — фоновое автообновление сертификатов
+  certbot:
+    image: certbot/certbot:latest
+    container_name: barcode_certbot
+    restart: unless-stopped
+    entrypoint: /bin/sh
+    command: -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 43200; done"
+    volumes:
+      - barcode_certbot_certs:/etc/letsencrypt
+      - barcode_certbot_www:/var/www/certbot
+    networks:
+      - barcode-shared
+
+volumes:
+  barcode_certbot_certs:
+    name: bff_certbot_certs
+  barcode_certbot_www:
+    name: bff_certbot_www

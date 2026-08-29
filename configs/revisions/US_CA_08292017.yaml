@@ -6,20 +6,16 @@ requiredInputFields:
   - lastName
   - dateOfBirth
 calculationChain:
+  # Правка под фактические возможности BarcodeGen (отчёт §4.2 п.5):
+  # calculate умеет только [DBA],[DCK],[DCF]; random — 6 фиксированных наборов.
+  # DAQ (№ водительского) — в random-наборе [DAQ].
   - field: DAQ
-    source: calculate
-    dependsOn: [firstName, lastName, dateOfBirth]
-  - field: DAK
-    source: calculate
-    dependsOn: [street, city, state, zipCode]
-  - field: DAE
     source: random
-    params:
-      type: date
-      range: [-30, 0]
-  - field: DBB
-    source: calculate
-    dependsOn: [dateOfBirth]
+  # DAK (ZIP) — часть random-набора адреса [DAG,DAI,DAK] (не отдельный calculate).
+  - field: DAK
+    source: random
+  # DAE убран: такого поля нет ни в calculate, ни в random BarcodeGen.
+  # DBB убран: dateOfBirth приходит от пользователя и маппится в DBB адаптером.
 schema:
   fields:
     - name: firstName

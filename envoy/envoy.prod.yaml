@@ -1,0 +1,203 @@
+# =============================================================================
+# Envoy — конфигурация для продакшена
+# =============================================================================
+#
+# Роль:
+#   Единая точка TLS-терминации с автоматическим обновлением сертификатов
+#   через Let's Encrypt / certbot, и маршрутизация внешних запросов на BFF.
+#
+# Listeners:
+#   :80    — HTTP: пропускает ACME challenge (/.well-known/acme-challenge/)
+#             к acme_http (nginx), всё остальное → 301 redirect на HTTPS
+#   :443   — HTTPS → plain HTTP → bff:8080
+#             Сертификат: /etc/letsencrypt/live/DOMAIN/fullchain.pem
+#             watched_directory — Envoy перезагружает сертификат после renew
+#   :9901  — Envoy Admin API (только 127.0.0.1)
+#
+# Подстановка:
+#   DOMAIN_PLACEHOLDER → реальный домен через sed (см. docker-compose.prod.yml).
+#
+# Объём: env_proxy_certbot_certs → /etc/letsencrypt:ro; certbot_www → /var/www/certbot:ro
+# =============================================================================
+
+static_resources:
+
+  listeners:
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Listener 1: HTTP (:80) — ACME challenge + 301 redirect
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: http_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 80
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                codec_type: AUTO
+                use_remote_address: true
+                route_config:
+                  name: http_route
+                  virtual_hosts:
+                    - name: http
+                      domains: [ "*" ]
+                      routes:
+                        - match:
+                            prefix: "/.well-known/acme-challenge/"
+                          route:
+                            cluster: acme_http
+                            timeout: 10s
+                        - match:
+                            prefix: "/"
+                          redirect:
+                            https_redirect: true
+                            response_code: MOVED_PERMANENTLY
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Listener 2: HTTPS (:443) → plain HTTP → bff:8080
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: https_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 443
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem
+                      watched_directory:
+                        path: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/
+                    private_key:
+                      filename: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem
+                      watched_directory:
+                        path: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/
+                tls_params:
+                  tls_minimum_protocol_version: TLSv1_2
+                  tls_maximum_protocol_version: TLSv1_3
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_https
+                codec_type: AUTO
+                use_remote_address: true
+                route_config:
+                  name: https_route
+                  virtual_hosts:
+                    - name: bff
+                      domains: [ "*" ]
+                      routes:
+                        - match:
+                            prefix: "/health"
+                          route:
+                            cluster: bff_http
+                            timeout: 5s
+                        - match:
+                            prefix: "/metrics"
+                          route:
+                            cluster: bff_http
+                            timeout: 5s
+                        - match:
+                            prefix: "/api/v1"
+                          route:
+                            cluster: bff_http
+                            timeout: 30s
+                            upgrade_configs:
+                              - upgrade_type: websocket
+                        - match:
+                            prefix: "/admin"
+                          route:
+                            cluster: bff_http
+                            timeout: 30s
+                        # SECURITY: internal ручки доступны только изнутри docker-сети.
+                        # Внешние запросы → 403 (сервисный токен вручную не проходит).
+                        - match:
+                            prefix: "/internal"
+                          direct_response:
+                            status: 403
+                            body:
+                              inline_string: "Forbidden"
+                        - match:
+                            prefix: "/artifacts/"
+                          route:
+                            cluster: bff_http
+                            timeout: 10s
+                        # Дефолт — Nuxt-фронтенд (тот же origin, API по /api/v1)
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: frontend_http
+                            timeout: 30s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+
+    # BFF (оркестратор) — plain HTTP внутри Docker-сети.
+    - name: bff_http
+      connect_timeout: 5s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: bff_http
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: bff
+                      port_value: 8080
+
+    # Nuxt-фронтенд (nginx, раздающий статический build или Nuxt SSR).
+    - name: frontend_http
+      connect_timeout: 5s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: frontend_http
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: frontend
+                      port_value: 80
+
+    # nginx:alpine — отдаёт ACME challenge файлы certbot (webroot)
+    - name: acme_http
+      connect_timeout: 5s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: acme_http
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: acme_http
+                      port_value: 80
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin API — только 127.0.0.1 (не публикуется через docker-compose.prod.yml)
+# ─────────────────────────────────────────────────────────────────────────────
+admin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 9901

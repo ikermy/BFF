@@ -120,3 +120,19 @@ func (h *InternalHandler) GenerateRaw(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 }
+
+// CheckCreditsStub — GET /internal/v1/billing/check/credits (D1, отчёт §4.3).
+//
+// Встроенный биллинг BarcodeGen первым делом зовёт canBuy(data.token) →
+// GET {BILLING_URL}/check/credits с пользовательским токеном. Пока BarcodeGen не
+// подключён к реальному Billing, его BILLING_URL указывается на этот stub:
+//   BILLING_URL = http://<bff-host>/internal/v1/billing
+//
+// Деньги уже гарантированы блоком саги BFF ДО вызова генерации, поэтому stub
+// просто возвращает «достаточно средств». Маршрут зарегистрирован ВНЕ защищённой
+// группы /internal (ServiceJWTMiddleware) — BarcodeGen присылает пользовательский
+// JWT, а не сервисный токен BFF. Это миграционная заглушка: убрать, когда
+// BarcodeGen перестанет вызывать свой canBuy или будет смотреть в реальный Billing.
+func (h *InternalHandler) CheckCreditsStub(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"credits": 100})
+}

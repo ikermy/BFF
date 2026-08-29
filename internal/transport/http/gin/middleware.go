@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ikermy/BFF/internal/adapters/barcodegen"
 	"github.com/ikermy/BFF/internal/domain"
 	"github.com/ikermy/BFF/internal/metrics"
 	"github.com/ikermy/BFF/internal/ports"
@@ -71,6 +72,9 @@ func UserJWTMiddleware(auth ports.AuthClient, enableLegacyAuth bool) gin.Handler
 		}
 
 		c.Set(ContextKeyUserInfo, userInfo)
+		// userID прокидывается в request-контекст — нужен legacy-адаптеру BarcodeGen
+		// для минта сервисного JWT (порт не расширяем, см. отчёт §4.2 п.1).
+		c.Request = c.Request.WithContext(barcodegen.WithUserID(c.Request.Context(), userInfo.UserID))
 		c.Next()
 	}
 }
