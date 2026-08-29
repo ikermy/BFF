@@ -46,6 +46,9 @@ fi
 # Имя временного контейнера
 BOOTSTRAP_CONTAINER="barcode_acme_bootstrap"
 
+# Гарантированная очистка временного nginx даже при ошибке (не занимает порт 80).
+trap 'docker rm -f "$BOOTSTRAP_CONTAINER" 2>/dev/null || true' EXIT
+
 echo ""
 echo "╔══════════════════════════════════════════════════════════════════╗"
 echo "║  Barcode System BFF — получение Let's Encrypt cert               ║"
@@ -91,10 +94,10 @@ echo "▶ Шаг 3/4: Запрашиваем сертификат у Let's Encry
 echo "  (certbot свяжется с сервером ACME и проверит домен)"
 echo ""
 
-# Собираем аргументы certbot; email опционален.
-CERTBOT_ARGS=(certonly --webroot --webroot-path /var/www/certbot --domain "$DOMAIN")
+# Собираем аргументы certbot; email опционален, --agree-tos обязателен всегда.
+CERTBOT_ARGS=(certonly --webroot --webroot-path /var/www/certbot --domain "$DOMAIN" --agree-tos --non-interactive)
 if [[ -n "$EMAIL" ]]; then
-  CERTBOT_ARGS+=(--email "$EMAIL" --agree-tos --no-eff-email)
+  CERTBOT_ARGS+=(--email "$EMAIL" --no-eff-email)
 else
   CERTBOT_ARGS+=(--register-unsafely-without-email)
 fi
@@ -102,7 +105,7 @@ fi
 docker run --rm \
   -v "${VOL_CERTS}:/etc/letsencrypt" \
   -v "${VOL_WWW}:/var/www/certbot" \
-  certbot/certbot:latest "${CERTBOT_ARGS[@]}" --non-interactive
+  certbot/certbot:latest "${CERTBOT_ARGS[@]}"
 
 # ── Шаг 4: Останавливаем временный nginx ─────────────────────────────────────
 echo ""

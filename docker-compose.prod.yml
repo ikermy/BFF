@@ -63,7 +63,10 @@ services:
       - barcode-shared
 
 volumes:
+  # external: создаются скриптом certbot-init.sh (docker volume create bff_certbot_*).
   barcode_certbot_certs:
+    external: true
     name: bff_certbot_certs
   barcode_certbot_www:
+    external: true
     name: bff_certbot_www
