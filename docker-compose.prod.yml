@@ -24,10 +24,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    command: >
-      /bin/sh -c 'sed "s/DOMAIN_PLACEHOLDER/$${DOMAIN}/g"
-        /etc/envoy/envoy.prod.yaml.template > /etc/envoy/envoy.yaml
-        && envoy -c /etc/envoy/envoy.yaml'
+    # Одна строка: sed-подстановка DOMAIN в /tmp/envoy.yaml (записываемый путь), затем envoy.
+    # НЕ пишем в /etc/envoy/envoy.yaml — в базовом compose этот путь смонтирован read-only.
+    command: /bin/sh -c 'sed "s/DOMAIN_PLACEHOLDER/$${DOMAIN}/g" /etc/envoy/envoy.prod.yaml.template > /tmp/envoy.yaml && envoy -c /tmp/envoy.yaml'
     environment:
       DOMAIN: "${DOMAIN:?DOMAIN required (e.g. example.com)}"
     volumes:

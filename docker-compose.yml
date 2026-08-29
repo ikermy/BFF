@@ -146,11 +146,12 @@ services:
     image: envoyproxy/envoy:v1.32-latest
     container_name: barcode_envoy
     restart: unless-stopped
+    command: ["envoy", "-c", "/etc/envoy/envoy.dev.yaml"]
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./envoy/envoy.dev.yaml:/etc/envoy/envoy.yaml:ro
+      - ./envoy/envoy.dev.yaml:/etc/envoy/envoy.dev.yaml:ro
       - ./envoy/certs:/etc/envoy/certs:ro
     depends_on:
       - bff
