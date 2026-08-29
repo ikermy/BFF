@@ -128,7 +128,8 @@ jobs:
             # Первичное получение Let's Encrypt-сертификата, если его ещё нет.
             if ! docker run --rm -v bff_certbot_certs:/certs alpine sh -c 'test -d /certs/live' >/dev/null 2>&1; then
               echo "Obtaining Let's Encrypt certificate for ${{ secrets.DOMAIN }}..."
-              DOMAIN="${{ secrets.DOMAIN }}" ./envoy/certbot-init.sh \
+              # bash-вызов: scp не сохраняет бит исполнения (x).
+              DOMAIN="${{ secrets.DOMAIN }}" bash ./envoy/certbot-init.sh \
                 || echo "certbot-init failed (проверьте DNS/порт 80); сертификат нужно получить вручную"
             fi
             # Поднимаем envoy + acme + certbot (прод-конфиг).
