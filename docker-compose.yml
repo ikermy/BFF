@@ -68,7 +68,7 @@ services:
 
   # ─────────────────────────── BFF Worker ────────────────────────────
   worker:
-    image: "${DOCKER_IMAGE:-bff:dev}"
+    image: "${DOCKER_IMAGE_WORKER:-bff-worker:dev}"
     build:
       context: .
       target: worker

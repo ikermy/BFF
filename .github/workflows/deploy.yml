@@ -25,16 +25,28 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build and push Docker image
+      - name: Build and push BFF API image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
+          target: api
           push: true
           platforms: linux/amd64
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}:prod
+      - name: Build and push BFF Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: worker
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}-worker:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}-worker:prod
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -66,6 +78,7 @@ jobs:
 
             # ── .env доступен по пути /barcode/bff/.env ──
             echo "DOCKER_IMAGE=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}:${{ github.sha }}" > .env
+            echo "DOCKER_IMAGE_WORKER=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}-worker:${{ github.sha }}" >> .env
             echo "BFF_PORT=8080" >> .env
             echo "UNIT_PRICE=${{ vars.UNIT_PRICE }}" >> .env
             # Обязательные для прод; при пустом секрете используется дефолт compose (тестовый запуск).
@@ -99,7 +112,7 @@ jobs:
             # ⚠️ Рекомендуется для прода: задать реальные значения этих секретов.
             # При пустых значениях .env — Docker Compose применяет дефолты из docker-compose.yml.
 
-            # ── Деплой приложения (образ тянется из ghcr.io, на сервере не собирается) ──
+            # ── Деплой приложения (образы тянутся из ghcr.io, на сервере не собираются) ──
             docker compose -f docker-compose.yml pull bff worker
             docker compose -f docker-compose.yml up -d bff worker kafka redis zookeeper
             docker compose -f docker-compose.yml ps
