@@ -1,0 +1,205 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  walletId       String?
+  lagoCustomerId String?  @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt @default(now())
+
+  creditBalances     CreditBalance[]
+  creditTransactions CreditTransaction[]
+  paymentTransactions PaymentTransaction[]
+  subscriptions      Subscription[]
+  sagas              BillingSaga[]
+}
+
+model Product {
+  id             String   @id @default(uuid())
+  name           String   
+  description    String
+  packages       Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt @default(now())
+
+  @@index([name])
+}
+
+model BillingConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SubscriptionPlan {
+  id             String         @id @default(uuid())
+  name           String
+  lagoPlanCode   String         @unique
+  monthlyCredits Int
+  priceMonthly   Decimal
+  currency       String         @default("USD")
+  features       Json?
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([isActive])
+}
+
+enum CreditType {
+  BARCODE
+  AI
+}
+
+enum CreditOperation {
+  PURCHASE
+  SUBSCRIPTION
+  CHARGE
+  REFUND
+  BONUS
+  BLOCK
+  UNBLOCK
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SagaStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAST_DUE
+  EXPIRED
+}
+
+model CreditBalance {
+  id         String     @id @default(uuid())
+  accountId  String
+  account    Account    @relation(fields: [accountId], references: [id])
+  creditType CreditType
+  balance    Int        @default(0)
+  reserved   Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([accountId, creditType])
+}
+
+model CreditTransaction {
+  id           String            @id @default(uuid())
+  accountId    String
+  account      Account           @relation(fields: [accountId], references: [id])
+  creditType   CreditType
+  amount       Int
+  balanceAfter Int
+  operation    CreditOperation
+  buildId      String?
+  batchId      String?
+  status       TransactionStatus
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([buildId])
+  @@index([batchId])
+}
+
+model PaymentTransaction {
+  id           String            @id @default(uuid())
+  accountId    String
+  account      Account           @relation(fields: [accountId], references: [id])
+  amount       Decimal           @default(0)
+  currency     String            @default("USD")
+  operation    String
+  source       String
+  status       TransactionStatus
+  walletBlockId String?          @unique
+  sagaId       String?           @unique
+  buildId      String?
+  batchId      String?
+  metadata     Json?
+  completedAt  DateTime?
+  failedAt     DateTime?
+  cancelledAt  DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([accountId, createdAt])
+  @@index([status, createdAt])
+  @@index([buildId])
+  @@index([batchId])
+}
+
+model BillingSaga {
+  id                 String      @id @default(uuid())
+  accountId          String
+  account            Account     @relation(fields: [accountId], references: [id])
+  subscriptionId     String?
+  subscriptionAmount Int         @default(0)
+  creditsAmount      Int         @default(0)
+  creditType         CreditType?
+  walletBlockId      String?
+  walletAmount       Decimal     @default(0)
+  status             SagaStatus
+  operation          String
+  buildId            String?
+  batchId            String?
+  expiresAt          DateTime
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  metadata           Json?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([buildId])
+  @@index([batchId])
+  @@index([status, expiresAt])
+}
+
+model Subscription {
+  id                 String             @id @default(uuid())
+  accountId          String
+  account            Account            @relation(fields: [accountId], references: [id])
+  planId             String
+  plan               SubscriptionPlan   @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  creditsAllocated   Int
+  creditsUsed        Int                @default(0)
+  lagoSubscriptionId String?            @unique
+  lagoExternalId     String?            @unique
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([accountId, status, currentPeriodEnd])
+}

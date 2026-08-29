@@ -1,0 +1,13 @@
+# Миграция БД через Prisma migrate deploy.
+# Запускается как разовый сервис (migrate) после поднятия PostgreSQL.
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY db/package.json ./
+RUN npm install
+
+COPY db/prisma ./prisma
+
+# Prisma читает DATABASE_URL из env (см. docker-compose.yml / .env).
+CMD ["npx", "prisma", "migrate", "deploy"]

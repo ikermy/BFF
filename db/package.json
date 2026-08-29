@@ -1,0 +1,8 @@
+{
+  "name": "db-migrate",
+  "private": true,
+  "description": "Prisma migrations for the platform database",
+  "dependencies": {
+    "prisma": "^6.1.0"
+  }
+}
