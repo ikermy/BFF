@@ -59,7 +59,7 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml,docker-compose.prod.yml,envoy/,configs/"
+          source: "docker-compose.yml,docker-compose.prod.yml,envoy/,configs/,db/"
           target: "/barcode/bff"
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -99,6 +99,9 @@ jobs:
             echo "KAFKA_BROKERS=${{ secrets.KAFKA_BROKERS }}" >> .env
             echo "KAFKA_GROUP_ID=${{ secrets.KAFKA_GROUP_ID }}" >> .env
             echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> .env
+            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
             echo "ARTIFACT_DIR=/app/artifacts" >> .env
             echo "ARTIFACT_PUBLIC_URL=${{ secrets.ARTIFACT_PUBLIC_URL }}" >> .env
             echo "ENABLE_PARTIAL_SUCCESS=${{ vars.ENABLE_PARTIAL_SUCCESS }}" >> .env
@@ -113,8 +116,22 @@ jobs:
             # При пустых значениях .env — Docker Compose применяет дефолты из docker-compose.yml.
 
             # ── Деплой приложения (образы тянутся из ghcr.io, на сервере не собираются) ──
-            docker compose -f docker-compose.yml pull bff worker
+            docker compose -f docker-compose.yml pull bff worker postgres
+            # Поднимаем инфраструктуру + БД + миграцию, затем приложение.
+            docker compose -f docker-compose.yml up -d postgres
+            docker compose -f docker-compose.yml run --rm migrate
             docker compose -f docker-compose.yml up -d bff worker kafka redis zookeeper
             docker compose -f docker-compose.yml ps
             docker run --rm --network barcode_shared curlimages/curl:8.10.1 -fsS http://bff:8080/health >/dev/null
+
+            # ── Envoy (prod): TLS-терминация + маршрутизация на bff/frontend ──
+            # Первичное получение Let's Encrypt-сертификата, если его ещё нет.
+            if ! docker run --rm -v bff_certbot_certs:/certs alpine sh -c 'test -d /certs/live' >/dev/null 2>&1; then
+              echo "Obtaining Let's Encrypt certificate for ${{ secrets.DOMAIN }}..."
+              DOMAIN="${{ secrets.DOMAIN }}" ./envoy/certbot-init.sh \
+                || echo "certbot-init failed (проверьте DNS/порт 80); сертификат нужно получить вручную"
+            fi
+            # Поднимаем envoy + acme + certbot (прод-конфиг).
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d envoy acme_http certbot
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml ps envoy acme_http certbot
             docker image prune -f

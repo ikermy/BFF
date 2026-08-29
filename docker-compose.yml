@@ -157,10 +157,46 @@ services:
     networks:
       - barcode-shared
 
+  # ──────────────────────────── PostgreSQL ─────────────────────────────
+  # БД платформы (Billing). Схема применяется сервисом migrate (Prisma).
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-billing}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-billing}"
+      POSTGRES_DB: "${POSTGRES_DB:-billing}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-billing} -d $${POSTGRES_DB:-billing}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - barcode-shared
+
+  # ──────────────────────────── DB Migration ───────────────────────────
+  # Разовая миграция: применяет Prisma-миграции (db/prisma) к PostgreSQL.
+  # Запускается после postgres (healthy) и завершается.
+  migrate:
+    build:
+      context: .
+      dockerfile: db/Dockerfile.migrate
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-billing}:${POSTGRES_PASSWORD:-billing}@postgres:5432/${POSTGRES_DB:-billing}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - barcode-shared
+
 volumes:
   zookeeper-data:
   kafka-data:
   redis-data:
+  postgres-data:
 
 networks:
   # Общая именованная сеть для связи с остальными контейнерами платформы
