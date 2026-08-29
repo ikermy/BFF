@@ -165,12 +165,14 @@ volumes:
 networks:
   # Общая именованная сеть для связи с остальными контейнерами платформы
   # (barcodegen, billing, history, auth, ai-service и др. — отдельные compose-проекты).
-  # Создаётся здесь (BFF — оркестратор/точка входа). Другие проекты подключаются:
+  # external: сеть создаётся заранее (деплой: docker network create barcode_shared,
+  # либо локально вручную), compose её только использует. Так избегаем конфликта
+  # "network exists but was not created by compose". Другие проекты подключаются:
   #   networks:
   #     default:
   #       external: true
   #       name: barcode_shared
   barcode-shared:
+    external: true
     name: barcode_shared
-    driver: bridge
 
