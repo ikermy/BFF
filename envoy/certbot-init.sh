@@ -95,7 +95,8 @@ echo "  (certbot свяжется с сервером ACME и проверит �
 echo ""
 
 # Собираем аргументы certbot; email опционален, --agree-tos обязателен всегда.
-CERTBOT_ARGS=(certonly --webroot --webroot-path /var/www/certbot --domain "$DOMAIN" --agree-tos --non-interactive)
+# --key-type rsa: гарантирует полный RSA-ключ (~1675 байт), который envoy читает надёжно.
+CERTBOT_ARGS=(certonly --webroot --webroot-path /var/www/certbot --domain "$DOMAIN" --agree-tos --non-interactive --key-type rsa --rsa-key-size 2048)
 if [[ -n "$EMAIL" ]]; then
   CERTBOT_ARGS+=(--email "$EMAIL" --no-eff-email)
 else

@@ -125,6 +125,8 @@ jobs:
             docker run --rm --network barcode_shared curlimages/curl:8.10.1 -fsS http://bff:8080/health >/dev/null
 
             # ── Envoy (prod): TLS-терминация + маршрутизация на bff/frontend ──
+            # Убрать ручной/застрявший envoy, чтобы compose мог создать контейнер с этим именем.
+            docker rm -f barcode_envoy 2>/dev/null || true
             # Первичное получение Let's Encrypt-сертификата, если его ещё нет.
             if ! docker run --rm -v bff_certbot_certs:/certs alpine sh -c 'test -d /certs/live' >/dev/null 2>&1; then
               echo "Obtaining Let's Encrypt certificate for ${{ secrets.DOMAIN }}..."
