@@ -78,12 +78,8 @@ static_resources:
                 tls_certificates:
                   - certificate_chain:
                       filename: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem
-                      watched_directory:
-                        path: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/
                     private_key:
                       filename: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem
-                      watched_directory:
-                        path: /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/
                 tls_params:
                   tls_minimum_protocol_version: TLSv1_2
                   tls_maximum_protocol_version: TLSv1_3
