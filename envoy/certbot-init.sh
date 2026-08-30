@@ -107,6 +107,10 @@ docker run --rm \
   -v "${VOL_WWW}:/var/www/certbot" \
   certbot/certbot:latest "${CERTBOT_ARGS[@]}"
 
+# Envoy читает ключи не-root'ом — сделать сертификаты читаемыми (иначе
+# "Failed to load incomplete private key" из-за прав 600 root).
+docker run --rm -v "${VOL_CERTS}:/certs" alpine sh -c 'chmod -R a+rX /certs' || true
+
 # ── Шаг 4: Останавливаем временный nginx ─────────────────────────────────────
 echo ""
 echo "▶ Шаг 4/4: Останавливаем временный HTTP server..."
