@@ -7,6 +7,8 @@ import (
 	"github.com/ikermy/BFF/internal/ports"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // AuthHandler — публичные auth-операции (login/register), проксируемые в Auth Service.
@@ -70,8 +72,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		Password: req.Password,
 	})
 	if err != nil {
-		// 401 UNAUTHORIZED — неверные учётные данные.
-		c.JSON(401, ErrorResponse{Code: "UNAUTHORIZED", Message: "invalid credentials"})
+		// 401 UNAUTHORIZED — неверные учётные данные (InvalidArgument / Unauthenticated).
+		// Прочие ошибки (Auth недоступен, внутренняя) — 500, чтобы не путать с неверным паролем.
+		code := status.Code(err)
+		if code == codes.InvalidArgument || code == codes.Unauthenticated ||
+			code == codes.NotFound || code == codes.PermissionDenied {
+			c.JSON(401, ErrorResponse{Code: "UNAUTHORIZED", Message: "invalid credentials"})
+			return
+		}
+		c.JSON(500, ErrorResponse{Code: "LOGIN_FAILED", Message: "login failed"})
 		return
 	}
 
@@ -137,8 +146,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Username: req.Username,
 	})
 	if err != nil {
-		// 409 CONFLICT — email уже занят, либо внутренняя ошибка Auth.
-		c.JSON(409, ErrorResponse{Code: "REGISTRATION_FAILED", Message: "registration failed"})
+		// 409 CONFLICT — email уже занят; прочие ошибки — 500 INTERNAL_ERROR.
+		if status.Code(err) == codes.AlreadyExists {
+			c.JSON(409, ErrorResponse{Code: "EMAIL_EXISTS", Message: "email already registered"})
+			return
+		}
+		c.JSON(500, ErrorResponse{Code: "REGISTRATION_FAILED", Message: "registration failed"})
 		return
 	}
 
