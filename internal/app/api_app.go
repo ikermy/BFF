@@ -100,11 +100,21 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 
 	// ── HTTP-клиенты downstream-сервисов ─────────────────────────────────────────────────
 
-	// Auth: LocalValidator — валидирует User JWT локально по shared JWT_SECRET (grpc_kafka_fixes.md §1.1).
-	// Auth Service является gRPC-only и не имеет HTTP-эндпоинта ValidateToken.
-	// MockClient используется только если JWT_SECRET не задан (локальная разработка без токенов).
+	// Auth: Auth является gRPC-only сервисом. Предпочтителен gRPC-клиент (GetUserInfo через
+	// auth.getPublicProfile по x-service-key), ValidateToken — локальная JWT-валидация.
 	var authClient ports.AuthClient
-	if secret := cfg.JWTSecret; secret != "" && secret != "dev-jwt-secret" {
+	if grpcURL := os.Getenv(config.EnvAuthGRPCURL); grpcURL != "" {
+		log.Printf("auth: using gRPC client → %s", grpcURL)
+		grpcClient, err := auth.NewGRPCClient(
+			grpcURL,
+			os.Getenv(config.EnvAuthServiceKey),
+			cfg.JWTSecret,
+		)
+		if err != nil {
+			log.Fatalf("auth: gRPC client init failed: %v", err)
+		}
+		authClient = grpcClient
+	} else if secret := cfg.JWTSecret; secret != "" && secret != "dev-jwt-secret" {
 		log.Printf("auth: using LocalValidator (JWT_SECRET set)")
 		authClient = auth.NewLocalValidator(secret)
 	} else if url := os.Getenv(config.EnvAuthURL); url != "" {
@@ -252,11 +262,30 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		bulkConsumer = kafkaadapter.NewMockConsumer(bulkHandler.Handle, 256)
 	}
 
-	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient)
+	// Публичные auth-команды (login/register) проксируются в Auth Service.
+	// GRPCClient реализует AuthCommandsClient; если он недоступен — используем MockClient.
+	var authCommands ports.AuthCommandsClient
+	if c, ok := authClient.(ports.AuthCommandsClient); ok && c != nil {
+		authCommands = c
+	} else {
+		authCommands = auth.NewMockClient()
+	}
+	authHandler := gintransport.NewAuthHandler(authCommands)
+
+	// Защищённые user-команды (changeAvatar) — GRPCClient или MockClient.
+	var authUserCommands ports.AuthUserCommandsClient
+	if c, ok := authClient.(ports.AuthUserCommandsClient); ok && c != nil {
+		authUserCommands = c
+	} else {
+		authUserCommands = auth.NewMockClient()
+	}
+
+	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient, authUserCommands)
 	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase, revisionStore, revisionSchemaCase, barcodeClient)
 	adminHandler := gintransport.NewAdminHandler(topUpBonusStore, kafkaTopicsStore, timeoutStore, revisionStore)
+
 	router := gintransport.NewRouter(
-		gintransport.Handlers{API: apiHandler, Internal: internalHandler, Admin: adminHandler},
+		gintransport.Handlers{API: apiHandler, Internal: internalHandler, Admin: adminHandler, Auth: authHandler},
 		authClient,
 		idempotencyStore,
 		cfg.InternalServiceJWT,

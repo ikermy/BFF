@@ -13,6 +13,7 @@ type Handlers struct {
 	API      *APIHandler
 	Internal *InternalHandler
 	Admin    *AdminHandler
+	Auth     *AuthHandler
 }
 
 // NewRouter собирает Gin-роутер с тремя защищёнными группами (п.16.1 ТЗ):
@@ -39,6 +40,17 @@ func NewRouter(
 	})
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
+	// /api/v1/auth/* — публичные auth-операции (login/register), проксируются в Auth Service.
+	// Не требуют User JWT: вызываются фронтендом до получения токена.
+	if h.Auth != nil {
+		authGroup := r.Group("/api/v1/auth")
+		{
+			authGroup.POST("/login", h.Auth.Login)
+			authGroup.POST("/register", h.Auth.Register)
+			authGroup.POST("/telegram", h.Auth.TelegramAuth)
+		}
+	}
+
 	// /api/v1/* — защищён User JWT через Legacy Auth Service
 	api := r.Group("/api/v1")
 	api.Use(UserJWTMiddleware(auth, enableLegacyAuth))
@@ -46,6 +58,18 @@ func NewRouter(
 		api.GET("/billing/quote", h.API.GetQuote)
 		api.GET("/revisions", h.API.ListRevisions)
 		api.GET("/revisions/:revision/schema", h.API.GetRevisionSchema)
+
+		// Профиль пользователя (email, username, nickname, фото, telegram) → Auth Service
+		api.GET("/settings/profile", h.API.GetUserProfile)
+
+		// Обновление фотографии профиля (base64 data URL) → Auth Service
+		api.POST("/settings/avatar", h.API.ChangeAvatar)
+
+		// Обновление Telegram username профиля → Auth Service
+		api.POST("/settings/telegram", h.API.ChangeTelegramUsername)
+
+		// Обновление отображаемого имени (nickname) профиля → Auth Service
+		api.POST("/settings/nickname", h.API.ChangeNickname)
 
 		// POST /barcode/generate — требует X-Idempotency-Key (п.14.1 ТЗ)
 		api.POST("/barcode/generate",

@@ -2,8 +2,10 @@ package gintransport
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ikermy/BFF/internal/domain"
 	"github.com/ikermy/BFF/internal/ports"
@@ -21,6 +23,7 @@ type APIHandler struct {
 	revisionStore  ports.RevisionConfigStore
 	barcode        ports.BarcodeGenClient
 	history        ports.HistoryClient
+	authUser       ports.AuthUserCommandsClient
 }
 
 func NewAPIHandler(
@@ -32,6 +35,7 @@ func NewAPIHandler(
 	revisionStore ports.RevisionConfigStore,
 	barcode ports.BarcodeGenClient,
 	history ports.HistoryClient,
+	authUser ports.AuthUserCommandsClient,
 ) *APIHandler {
 	return &APIHandler{
 		quote:          quote,
@@ -42,6 +46,7 @@ func NewAPIHandler(
 		revisionStore:  revisionStore,
 		barcode:        barcode,
 		history:        history,
+		authUser:       authUser,
 	}
 }
 
@@ -206,4 +211,146 @@ func (h *APIHandler) GenerateCode128(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// changeAvatarRequest — тело POST /api/v1/settings/avatar.
+type changeAvatarRequest struct {
+	PhotoBase64 string `json:"photo" binding:"required"`
+}
+
+// ChangeAvatar — POST /api/v1/settings/avatar (защищён User JWT).
+// Обновляет фотографию профиля (base64 data URL), проксируя в Auth Service.
+func (h *APIHandler) ChangeAvatar(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	var req changeAvatarRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError("photo is required"))
+		return
+	}
+
+	// Берём оригинальный User JWT и форвардим в Auth Service для авторизации.
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	if err := h.authUser.ChangeAvatar(c.Request.Context(), token, req.PhotoBase64); err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to update avatar: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "photoLen": len(req.PhotoBase64)})
+}
+
+// GetUserProfile — GET /api/v1/settings/profile (защищён User JWT).
+// Возвращает полный профиль пользователя (email, username, nickname, фото, telegram).
+func (h *APIHandler) GetUserProfile(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	profile, err := h.authUser.GetUserProfile(c.Request.Context(), token)
+	if err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to get user profile: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, profile)
+}
+
+// changeTelegramUsernameRequest — тело POST /api/v1/settings/telegram.
+type changeTelegramUsernameRequest struct {
+	TelegramUsername string `json:"telegram" binding:"required"`
+}
+
+// ChangeTelegramUsername — POST /api/v1/settings/telegram (защищён User JWT).
+// Обновляет Telegram username профиля (без @), проксируя в Auth Service.
+func (h *APIHandler) ChangeTelegramUsername(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	var req changeTelegramUsernameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError("telegram is required"))
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	clean := strings.TrimSpace(req.TelegramUsername)
+	clean = strings.TrimPrefix(clean, "@")
+
+	if err := h.authUser.ChangeTelegramUsername(c.Request.Context(), token, clean); err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to update telegram username: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "telegramUsername": clean})
+}
+
+// changeNicknameRequest — тело POST /api/v1/settings/nickname.
+type changeNicknameRequest struct {
+	Nickname string `json:"nickname" binding:"required"`
+}
+
+// ChangeNickname — POST /api/v1/settings/nickname (защищён User JWT).
+// Обновляет отображаемое имя (nickname) профиля, проксируя в Auth Service.
+func (h *APIHandler) ChangeNickname(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	var req changeNicknameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError("nickname is required"))
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	if err := h.authUser.ChangeNickname(c.Request.Context(), token, req.Nickname); err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to update nickname: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "nickname": req.Nickname})
 }

@@ -74,6 +74,34 @@ type AuthClient interface {
 	GetUserInfo(ctx context.Context, userID string) (domain.UserInfo, error)
 }
 
+// AuthCommandsClient — порт команд аутентификации (login/register/refresh) через Auth Service (gRPC).
+// Публичные операции, не требующие User JWT. Используются фронтендом через BFF-прокси.
+type AuthCommandsClient interface {
+	// Login аутентифицирует пользователя по email/password и возвращает токены.
+	Login(ctx context.Context, creds domain.Credentials) (domain.AuthTokens, error)
+	// Register создаёт нового пользователя и возвращает токены.
+	Register(ctx context.Context, creds domain.Credentials) (domain.AuthTokens, error)
+	// TelegramAuth аутентифицирует/регистрирует пользователя по данным Telegram OAuth
+	// (id, first_name, last_name, username, photo_url, auth_date, hash) и возвращает токены.
+	TelegramAuth(ctx context.Context, data domain.TelegramAuthData) (domain.AuthTokens, error)
+}
+
+// AuthUserCommandsClient — порт команд пользователя, требующих User JWT (защищённые).
+type AuthUserCommandsClient interface {
+	// ChangeAvatar обновляет фотографию профиля (base64 data URL; пустая строка — удалить).
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	ChangeAvatar(ctx context.Context, accessToken, photoBase64 string) error
+	// ChangeNickname обновляет отображаемое имя (nickname) профиля.
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	ChangeNickname(ctx context.Context, accessToken, newNickname string) error
+	// ChangeTelegramUsername обновляет Telegram username профиля (без @; пустая строка — удалить).
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	ChangeTelegramUsername(ctx context.Context, accessToken, telegramUsername string) error
+	// GetUserProfile возвращает полный профиль пользователя (email, username, nickname, фото, telegram).
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	GetUserProfile(ctx context.Context, accessToken string) (domain.UserProfile, error)
+}
+
 // NotificationsPublisher — порт отправки уведомлений через Kafka (п.11.2 ТЗ).
 // Топик: notifications.send. Направление: BFF → Notifications Service.
 type NotificationsPublisher interface {

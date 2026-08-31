@@ -3,9 +3,8 @@
 # =============================================================================
 #
 # Роль:
-#   Единая точка TLS-терминации и маршрутизации для BFF (сервиса-оркестратора).
-#   Внешние клиенты (фронтенд) и сервисы обращаются к BFF через Envoy по TLS;
-#   внутри Docker-сети BFF общается с downstream по plain HTTP.
+#   Единая точка TLS-терминации и маршрутизации для BFF (сервиса-оркестратора)
+#   и Nuxt-фронтенда. Внешние клиенты обращаются через Envoy по TLS.
 #
 # Listeners:
 #   :80    — HTTP → 301 redirect на HTTPS
@@ -17,12 +16,12 @@
 #   /api/v1/*   → bff        (публичный API фронтенда)
 #   /admin/*    → bff        (админ-панель, Admin JWT)
 #   /internal/* → bff        (внутренние ручки, Service Token)
-#   /artifacts/ → bff        (статическая раздача переложенных PNG, D2 этап 2)
+#   /artifacts/ → bff        (статическая раздача переложенных PNG)
 #   /health, /metrics → bff
 #   /*          → frontend   (Nuxt-статика/SSR)
 #
-# Сертификаты (см. docker-compose.yml, volume envoy/certs):
-#   localhost.pem / localhost-key.pem — сгенерировать: ./envoy/gen-certs.sh
+# Сертификаты монтируются отдельными файлами из envoy/certs
+# (см. docker-compose.yml), как в рабочем air_orchestrator.
 # =============================================================================
 
 static_resources:
@@ -136,7 +135,7 @@ static_resources:
                           route:
                             cluster: bff_http
                             timeout: 30s
-                        # Переложенные PNG (D2 этап 2, ARTIFACT_PUBLIC_URL)
+                        # Переложенные PNG (D2 этап 2)
                         - match:
                             prefix: "/artifacts/"
                           route:
@@ -174,7 +173,6 @@ static_resources:
                       port_value: 8080
 
     # Nuxt-фронтенд (nginx, раздающий статический build или Nuxt SSR).
-    # Должен быть в той же docker-сети, что и envoy.
     - name: frontend_http
       connect_timeout: 5s
       type: STRICT_DNS

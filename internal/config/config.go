@@ -49,7 +49,11 @@ const (
 	// NOTIFICATIONS_URL и TRANS_HISTORY_URL перечислены в п.17.1 ТЗ как обязательные ENV vars,
 	// однако BFF взаимодействует с этими сервисами через Kafka (п.11.2, п.11.3 ТЗ), а не HTTP.
 	// URL хранятся в конфиге для соответствия спецификации и возможного future use.
-	EnvAuthURL          = "AUTH_URL"
+	EnvAuthURL = "AUTH_URL"
+	// AUTH_GRPC_URL — адрес Auth Service (gRPC), например "auth-service:50051".
+	// AUTH_SERVICE_KEY — ключ доверенного сервиса (x-service-key) для межсервисных операций.
+	EnvAuthGRPCURL      = "AUTH_GRPC_URL"
+	EnvAuthServiceKey   = "AUTH_SERVICE_KEY"
 	EnvNotificationsURL = "NOTIFICATIONS_URL"
 	EnvTransHistoryURL  = "TRANS_HISTORY_URL"
 

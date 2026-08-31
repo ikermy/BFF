@@ -34,6 +34,10 @@ services:
       HISTORY_URL: "${HISTORY_URL:-http://history:3000}"
       # Legacy services (согласно ТЗ)
       AUTH_URL: "${AUTH_URL:-http://auth-service:3000}"
+      # Auth Service (gRPC) — межсервисные операции (getPublicProfile, findUserByUsername)
+      AUTH_GRPC_URL: "${AUTH_GRPC_URL:-auth-service:50051}"
+      # Dev-дефолт совпадает с dev SERVICE_API_KEYS в auth/.env. Для прод задаётся из secrets.
+      AUTH_SERVICE_KEY: "${AUTH_SERVICE_KEY:-dev-shared-auth-service-key}"
       NOTIFICATIONS_URL: "${NOTIFICATIONS_URL:-http://notifications:3000}"
       TRANS_HISTORY_URL: "${TRANS_HISTORY_URL:-http://trans-history:3000}"
       # Kafka
@@ -146,13 +150,18 @@ services:
     image: envoyproxy/envoy:v1.32-latest
     container_name: barcode_envoy
     restart: unless-stopped
-    command: ["envoy", "-c", "/etc/envoy/envoy.dev.yaml"]
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml"]
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./envoy/envoy.dev.yaml:/etc/envoy/envoy.dev.yaml:ro
-      - ./envoy/certs:/etc/envoy/certs:ro
+      - ./envoy/envoy.dev.yaml:/etc/envoy/envoy.yaml:ro
+      # Сертификаты монтируются отдельными файлами (как в air_orchestrator) —
+      # так envoy корректно читает их на Windows Docker Desktop.
+      - ./envoy/certs/localhost.pem:/etc/envoy/certs/localhost.pem:ro
+      - ./envoy/certs/localhost-key.pem:/etc/envoy/certs/localhost-key.pem:ro
+      - ./envoy/certs/host.pem:/etc/envoy/certs/host.pem:ro
+      - ./envoy/certs/host-key.pem:/etc/envoy/certs/host-key.pem:ro
     depends_on:
       - bff
     networks:

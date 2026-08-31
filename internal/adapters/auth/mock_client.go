@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ikermy/BFF/internal/domain"
+	"github.com/ikermy/BFF/internal/ports"
 )
 
 // MockClient имитирует Legacy Auth Service.
@@ -48,3 +49,64 @@ func (c *MockClient) GetUserInfo(_ context.Context, userID string) (domain.UserI
 		Permissions: []string{"barcode:generate", "barcode:edit"},
 	}, nil
 }
+
+// Login имитирует аутентификацию и возвращает тестовые токены (для dev, без Auth Service).
+func (c *MockClient) Login(_ context.Context, creds domain.Credentials) (domain.AuthTokens, error) {
+	if creds.Email == "" || creds.Password == "" {
+		return domain.AuthTokens{}, fmt.Errorf("email and password are required")
+	}
+	return domain.AuthTokens{
+		AccessToken:  "mock-access-token",
+		RefreshToken: "mock-refresh-token",
+	}, nil
+}
+
+// Register имитирует регистрацию и возвращает тестовые токены (для dev, без Auth Service).
+func (c *MockClient) Register(_ context.Context, creds domain.Credentials) (domain.AuthTokens, error) {
+	if creds.Email == "" || creds.Password == "" || creds.Username == "" {
+		return domain.AuthTokens{}, fmt.Errorf("email, password and username are required")
+	}
+	return domain.AuthTokens{
+		AccessToken:  "mock-access-token",
+		RefreshToken: "mock-refresh-token",
+	}, nil
+}
+
+// TelegramAuth имитирует вход/регистрацию через Telegram (для dev, без Auth Service).
+func (c *MockClient) TelegramAuth(_ context.Context, _ domain.TelegramAuthData) (domain.AuthTokens, error) {
+	return domain.AuthTokens{
+		AccessToken:  "mock-tg-access-token",
+		RefreshToken: "mock-tg-refresh-token",
+	}, nil
+}
+
+// ChangeAvatar имитирует обновление фотографии профиля (для dev, без Auth Service).
+func (c *MockClient) ChangeAvatar(_ context.Context, _ string, photoBase64 string) error {
+	if photoBase64 != "" && len(photoBase64) > 1_500_000 {
+		return fmt.Errorf("photo is too large")
+	}
+	return nil
+}
+
+// ChangeTelegramUsername имитирует обновление Telegram username (для dev, без Auth Service).
+func (c *MockClient) ChangeTelegramUsername(_ context.Context, _ string, telegramUsername string) error {
+	return nil
+}
+
+// ChangeNickname имитирует обновление отображаемого имени (для dev, без Auth Service).
+func (c *MockClient) ChangeNickname(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// GetUserProfile имитирует получение профиля (для dev, без Auth Service).
+func (c *MockClient) GetUserProfile(_ context.Context, _ string) (domain.UserProfile, error) {
+	return domain.UserProfile{
+		UserID:   "mock-user-1",
+		Email:    "mock@example.com",
+		Username: "mockuser",
+	}, nil
+}
+
+// compile-time check
+var _ ports.AuthCommandsClient = (*MockClient)(nil)
+var _ ports.AuthUserCommandsClient = (*MockClient)(nil)
