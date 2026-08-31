@@ -1,0 +1,435 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+    rpc login(LoginRequest) returns (LoginResponse);
+    rpc register(RegisterRequest) returns (RegisterResponse);
+    rpc refreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+    rpc telegramAuth(TelegramAuthRequest) returns (TelegramAuthResponse);
+    rpc telegramLogin(TelegramLoginRequest) returns (TelegramLoginResponse);
+    rpc linkTelegramAccount(LinkTelegramRequest) returns (LinkTelegramResponse);
+    
+    // Seed phrase methods for access
+    rpc enableSeedPhrase(EnableSeedPhraseRequest) returns (EnableSeedPhraseResponse);
+    rpc verifySeedPhrase(VerifySeedPhraseRequest) returns (VerifySeedPhraseResponse);
+    rpc disableSeedPhrase(DisableSeedPhraseRequest) returns (DisableSeedPhraseResponse);
+    rpc getSeedPhraseStatus(GetSeedPhraseStatusRequest) returns (GetSeedPhraseStatusResponse);
+    
+    // User profile management
+    rpc changePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+    rpc changeEmail(ChangeEmailRequest) returns (ChangeEmailResponse);
+    rpc changeTelegramAccount(ChangeTelegramAccountRequest) returns (ChangeTelegramAccountResponse);
+    rpc terminateAllSessions(TerminateAllSessionsRequest) returns (TerminateAllSessionsResponse);
+    rpc linkEmailToAccount(LinkEmailRequest) returns (LinkEmailResponse);
+    rpc syncUsername(SyncUsernameRequest) returns (SyncUsernameResponse);
+    
+    // User identity management
+    rpc changeUsername(ChangeUsernameRequest) returns (ChangeUsernameResponse);
+    rpc changeNickname(ChangeNicknameRequest) returns (ChangeNicknameResponse);
+    rpc changeTelegramUsername(ChangeTelegramUsernameRequest) returns (ChangeTelegramUsernameResponse);
+    rpc changeAvatar(ChangeAvatarRequest) returns (ChangeAvatarResponse);
+    rpc getUserIdentity(GetUserIdentityRequest) returns (GetUserIdentityResponse);
+    rpc getUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
+    rpc suggestUsernameAlternatives(SuggestUsernameAlternativesRequest) returns (SuggestUsernameAlternativesResponse);
+
+    // Two-Factor Authentication
+    rpc enable2FA(Enable2FARequest) returns (Enable2FAResponse);
+    rpc verify2FA(Verify2FARequest) returns (Verify2FAResponse);
+    rpc disable2FA(Disable2FARequest) returns (Disable2FAResponse);
+
+    // Anomaly detection
+    rpc getAnomalyStats(GetAnomalyStatsRequest) returns (GetAnomalyStatsResponse);
+
+    // Account readiness для frontend
+    rpc getAccountReadiness(GetAccountReadinessRequest) returns (GetAccountReadinessResponse);
+
+    // Административный аудит: история смен Telegram (только admin)
+    rpc getTelegramIdentityHistory(GetTelegramIdentityHistoryRequest) returns (GetTelegramIdentityHistoryResponse);
+
+    // Межсервисные операции (только доверенные сервисы по service key)
+    rpc getPublicProfile(GetPublicProfileRequest) returns (PublicProfileResponse);
+    rpc findUserByUsername(FindUserByUsernameRequest) returns (FindUserByUsernameResponse);
+}
+
+message LoginRequest {
+    string email = 1; // max 255 chars
+    string password = 2; // max 1000 chars
+}
+
+message LoginResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+message RegisterRequest {
+    string email = 1; // max 255 chars
+    string password = 2; // max 1000 chars
+    string username = 3; // max 50 chars, required
+}
+
+message RegisterResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+message RefreshTokenRequest {
+    string refresh_token = 1; // max 2000 chars
+}
+
+message RefreshTokenResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+message TelegramAuthRequest {
+    string telegram_id = 1; // max 50 chars
+    string first_name = 2; // max 100 chars
+    string last_name = 3; // max 100 chars
+    string username = 4; // max 50 chars
+    string photo_url = 5; // max 500 chars
+    string auth_date = 6; // max 20 chars
+    string hash = 7; // max 100 chars
+}
+
+message TelegramAuthResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+    bool is_new_user = 3;
+}
+
+message TelegramLoginRequest {
+    string telegram_id = 1; // max 50 chars
+    string auth_date = 2; // max 20 chars
+    string hash = 3; // max 100 chars
+}
+
+message TelegramLoginResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+message LinkTelegramRequest {
+    string user_id = 1; // max 100 chars
+    string telegram_id = 2; // max 50 chars
+    string first_name = 3; // max 100 chars
+    string last_name = 4; // max 100 chars
+    string username = 5; // max 50 chars
+    string photo_url = 6; // max 500 chars
+    string auth_date = 7; // max 20 chars
+    string hash = 8; // max 100 chars
+}
+
+message LinkTelegramResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Seed phrase messages
+message EnableSeedPhraseRequest {
+    string user_id = 1; // max 100 chars
+    string seed_phrase = 2; // max 1000 chars
+}
+
+message EnableSeedPhraseResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message VerifySeedPhraseRequest {
+    string user_id = 1; // max 100 chars
+    string seed_phrase = 2; // max 1000 chars
+}
+
+message VerifySeedPhraseResponse {
+    bool success = 1;
+    string message = 2;
+    string request_id = 3; // ID запроса на восстановление (recovery flow)
+    string grant_state = 4; // pending_review | approved | rejected | granted
+}
+
+message DisableSeedPhraseRequest {
+    string user_id = 1; // max 100 chars
+    string seed_phrase = 2; // max 1000 chars
+}
+
+message DisableSeedPhraseResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetSeedPhraseStatusRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message GetSeedPhraseStatusResponse {
+    bool enabled = 1;
+    int32 attempts = 2;
+    string locked_until = 3; // ISO string or empty
+    string message = 4;
+}
+
+// User profile management messages
+message ChangePasswordRequest {
+    string user_id = 1; // max 100 chars
+    string current_password = 2; // max 1000 chars
+    string new_password = 3; // max 1000 chars
+}
+
+message ChangePasswordResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ChangeEmailRequest {
+    string user_id = 1; // max 100 chars
+    string current_password = 2; // max 1000 chars
+    string new_email = 3; // max 255 chars
+}
+
+message ChangeEmailResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message ChangeTelegramAccountRequest {
+    string user_id = 1; // max 100 chars
+    string telegram_id = 2; // max 50 chars
+    string first_name = 3; // max 100 chars
+    string last_name = 4; // max 100 chars
+    string username = 5; // max 50 chars
+    string photo_url = 6; // max 500 chars
+    string auth_date = 7; // max 20 chars
+    string hash = 8; // max 100 chars
+}
+
+message ChangeTelegramAccountResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message TerminateAllSessionsRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message TerminateAllSessionsResponse {
+    bool success = 1;
+    string message = 2;
+    int32 terminated_sessions = 3;
+}
+
+// Link email to existing account
+message LinkEmailRequest {
+    string user_id = 1; // max 100 chars
+    string email = 2; // max 255 chars
+    string password = 3; // max 1000 chars
+}
+
+message LinkEmailResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Sync User Username with Telegram data
+message SyncUsernameRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message SyncUsernameResponse {
+    bool success = 1;
+    string message = 2;
+    string username = 3; // Updated username
+}
+
+// User identity management messages
+message ChangeUsernameRequest {
+    string user_id = 1; // max 100 chars
+    string new_username = 2; // max 50 chars
+}
+
+message ChangeUsernameResponse {
+    bool success = 1;
+    string message = 2;
+    string username = 3; // Updated username
+    bool has_alternatives = 4; // Whether alternative usernames are available
+    repeated string alternative_usernames = 5; // Suggested alternative usernames
+}
+
+message ChangeNicknameRequest {
+    string user_id = 1; // max 100 chars
+    string new_nickname = 2; // max 100 chars
+}
+
+message ChangeNicknameResponse {
+    bool success = 1;
+    string message = 2;
+    string nickname = 3; // Updated nickname
+}
+
+message ChangeTelegramUsernameRequest {
+    string user_id = 1; // max 100 chars
+    string telegram_username = 2; // max 50 chars (без @)
+}
+
+message ChangeTelegramUsernameResponse {
+    bool success = 1;
+    string message = 2;
+    string telegram_username = 3; // Updated telegram username
+}
+
+message ChangeAvatarRequest {
+    string user_id = 1; // max 100 chars
+    string photo_base64 = 2; // data URL (data:image/png;base64,...) или пустая строка для удаления
+}
+
+message ChangeAvatarResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message GetUserIdentityRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message GetUserIdentityResponse {
+    bool success = 1;
+    string message = 2;
+    string user_id = 3; // User ID (неизменяемый)
+    string username = 4; // Username (изменяемый)
+    string nickname = 5; // Nickname (изменяемый)
+}
+
+message GetUserProfileRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message GetUserProfileResponse {
+    bool success = 1;
+    string message = 2;
+    string user_id = 3; // User ID
+    string email = 4; // Email
+    string username = 5; // Username
+    string nickname = 6; // Nickname
+    string photo_base64 = 7; // Загруженная фотография профиля (base64 data URL) или пусто
+    string telegram_username = 8; // Telegram username (без @) или пусто
+    string telegram_id = 9; // Telegram ID или пусто
+    string telegram_photo_url = 10; // URL фото из Telegram (или пусто)
+    string origin = 11; // Способ создания аккаунта: email | telegram
+    bool is_telegram_verified = 12; // Признак подтверждённого Telegram
+}
+
+message SuggestUsernameAlternativesRequest {
+    string user_id = 1; // max 100 chars
+    string desired_username = 2; // max 50 chars
+    int32 max_alternatives = 3; // max 10 alternatives
+}
+
+message SuggestUsernameAlternativesResponse {
+    bool success = 1;
+    string message = 2;
+    repeated string alternative_usernames = 3; // Suggested alternative usernames
+}
+
+// Two-Factor Authentication messages
+message Enable2FARequest {
+    string user_id = 1; // max 100 chars
+}
+
+message Enable2FAResponse {
+    string qr_code = 1;
+    repeated string backup_codes = 2;
+}
+
+message Verify2FARequest {
+    string user_id = 1; // max 100 chars
+    string token = 2; // max 10 chars
+}
+
+message Verify2FAResponse {
+    bool success = 1;
+    string access_token = 2; // выдаётся после успешного прохождения 2FA
+    string refresh_token = 3;
+    repeated string backup_codes = 4; // выдаются один раз при завершении настройки 2FA
+}
+
+message Disable2FARequest {
+    string user_id = 1; // max 100 chars
+    string current_password = 2; // усиленное подтверждение: пароль (если есть)
+    string token = 3; // активный TOTP, если 2FA включена
+}
+
+message Disable2FAResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Anomaly detection messages
+message GetAnomalyStatsRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message GetAnomalyStatsResponse {
+    int32 total_events = 1;
+    int32 anomaly_events = 2;
+    double average_score = 3;
+    string last_anomaly = 4; // ISO string or empty
+}
+
+// Account readiness messages
+message GetAccountReadinessRequest {
+    string user_id = 1; // max 100 chars
+}
+
+message GetAccountReadinessResponse {
+    bool has_verified_email = 1;
+    bool has_telegram = 2;
+    bool has_password = 3;
+    bool two_fa_enabled = 4;
+    bool has_recovery_phrase = 5;
+    string last_recovery_verified_at = 6; // ISO string or empty
+    string account_status = 7; // active | pending_email | limited | frozen | deactivated
+    repeated string required_actions = 8; // стабильные коды обязательных действий
+    repeated string recommended_actions = 9; // стабильные коды рекомендуемых действий
+}
+
+// Административный аудит: история смен Telegram
+message GetTelegramIdentityHistoryRequest {
+    string user_id = 1; // целевой User ID
+    int32 page = 2; // 1-based, default 1
+    int32 limit = 3; // default 20, max 100
+}
+
+message TelegramIdentityHistoryEntry {
+    string id = 1;
+    string event_type = 2;
+    string previous_data = 3; // JSON-строка со снимком старых данных
+    string created_at = 4; // ISO string
+}
+
+message GetTelegramIdentityHistoryResponse {
+    repeated TelegramIdentityHistoryEntry entries = 1;
+    int32 total = 2;
+    int32 page = 3;
+    int32 limit = 4;
+}
+
+// Межсервисные операции (публичный профиль, без секретов)
+message GetPublicProfileRequest {
+    string user_id = 1; // User ID
+}
+
+message FindUserByUsernameRequest {
+    string username = 1;
+}
+
+message PublicProfileResponse {
+    string user_id = 1;
+    string username = 2;
+    string nickname = 3;
+    string created_at = 4; // ISO string
+}
+
+message FindUserByUsernameResponse {
+    bool found = 1;
+    PublicProfileResponse profile = 2;
+}
