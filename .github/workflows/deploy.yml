@@ -59,7 +59,7 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml,docker-compose.prod.yml,envoy/,configs/,db/"
+          source: "docker-compose.yml,docker-compose.prod.yml,envoy/,configs/,db/,prometheus/"
           target: "/barcode/bff"
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -114,6 +114,9 @@ jobs:
             echo "ENABLE_NOTIFICATIONS=${{ vars.ENABLE_NOTIFICATIONS }}" >> .env
             echo "MAINTENANCE_MODE=${{ vars.MAINTENANCE_MODE }}" >> .env
             echo "DOMAIN=${{ secrets.DOMAIN }}" >> .env
+            # Observability: Grafana admin (по умолчанию admin, задайте secret для прода).
+            echo "GRAFANA_USER=${{ vars.GRAFANA_USER }}" >> .env
+            echo "GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}" >> .env
             chmod 600 .env
 
             # ⚠️ Рекомендуется для прода: задать реальные значения этих секретов.
@@ -148,7 +151,7 @@ jobs:
               DOMAIN="${{ secrets.DOMAIN }}" bash ./envoy/certbot-init.sh \
                 || echo "certbot-init failed (проверьте DNS/порт 80); сертификат нужно получить вручную"
             fi
-            # Поднимаем envoy + acme + certbot (прод-конфиг).
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d envoy acme_http certbot
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml ps envoy acme_http certbot
+            # Поднимаем observability (pgadmin/prometheus/grafana/экспортёры) + envoy + acme + certbot (прод-конфиг).
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d pgadmin prometheus grafana postgres-exporter redis-exporter envoy acme_http certbot
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml ps pgadmin prometheus grafana postgres-exporter redis-exporter envoy acme_http certbot
             docker image prune -f
