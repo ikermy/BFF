@@ -61,7 +61,73 @@ services:
     networks:
       - barcode-shared
 
+  # ─────────────────────────── Observability ─────────────────────────
+  # Общий мониторинг платформы. Prometheus/Grafana и экспортёры живут здесь
+  # (в оркестраторе bff), а не в отдельных микросервисах — чтобы не дублировать
+  # копии и держать единый prometheus.yml с таргетами на все сервисы платформы.
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: barcode_prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - barcode-shared
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: barcode_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - barcode-shared
+
+  # Экспортёр PostgreSQL → метрики в Prometheus
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: barcode_postgres_exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-billing}:${POSTGRES_PASSWORD:-billing}@postgres:5432/${POSTGRES_DB:-billing}?sslmode=disable"
+    depends_on:
+      - postgres
+    networks:
+      - barcode-shared
+
+  # Экспортёр Redis → метрики в Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: barcode_redis_exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: "redis://redis:6379/0"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+    depends_on:
+      - redis
+    networks:
+      - barcode-shared
+
 volumes:
+  prometheus_data:
+  grafana_data:
   # external: создаются скриптом certbot-init.sh (docker volume create bff_certbot_*).
   barcode_certbot_certs:
     external: true
