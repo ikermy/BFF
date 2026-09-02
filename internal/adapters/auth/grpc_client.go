@@ -178,6 +178,54 @@ func (c *GRPCClient) GetUserProfile(ctx context.Context, accessToken string) (do
 	}, nil
 }
 
+// LinkEmailToAccount привязывает email к аккаунту через auth.linkEmailToAccount (gRPC).
+// accessToken форвардится как User JWT (authorization metadata) для GrpcAuthGuard.
+// password может быть пустым (email-only: пароль и origin не меняются).
+func (c *GRPCClient) LinkEmailToAccount(ctx context.Context, accessToken, email, password string) error {
+	outCtx := metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+accessToken)
+	_, err := c.client.LinkEmailToAccount(outCtx, &pb.LinkEmailRequest{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return fmt.Errorf("auth: link email: %w", err)
+	}
+	return nil
+}
+
+// ChangeTelegramAccount меняет/обновляет Telegram identity через auth.changeTelegramAccount (gRPC).
+// accessToken форвардится как User JWT (authorization metadata) для GrpcAuthGuard.
+func (c *GRPCClient) ChangeTelegramAccount(ctx context.Context, accessToken string, data domain.TelegramAuthData) error {
+	outCtx := metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+accessToken)
+	_, err := c.client.ChangeTelegramAccount(outCtx, &pb.ChangeTelegramAccountRequest{
+		TelegramId: data.TelegramID,
+		FirstName:  data.FirstName,
+		LastName:   data.LastName,
+		Username:   data.Username,
+		PhotoUrl:   data.PhotoURL,
+		AuthDate:   data.AuthDate,
+		Hash:       data.Hash,
+	})
+	if err != nil {
+		return fmt.Errorf("auth: change telegram account: %w", err)
+	}
+	return nil
+}
+
+// ChangePassword меняет пароль пользователя через auth.changePassword (gRPC).
+// accessToken форвардится как User JWT (authorization metadata) для GrpcAuthGuard.
+func (c *GRPCClient) ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error {
+	outCtx := metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+accessToken)
+	_, err := c.client.ChangePassword(outCtx, &pb.ChangePasswordRequest{
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+	})
+	if err != nil {
+		return fmt.Errorf("auth: change password: %w", err)
+	}
+	return nil
+}
+
 // compile-time check
 var _ ports.AuthClient = (*GRPCClient)(nil)
 var _ ports.AuthCommandsClient = (*GRPCClient)(nil)

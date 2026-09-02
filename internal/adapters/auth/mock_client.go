@@ -107,6 +107,30 @@ func (c *MockClient) GetUserProfile(_ context.Context, _ string) (domain.UserPro
 	}, nil
 }
 
+// LinkEmailToAccount имитирует привязку email к аккаунту (для dev, без Auth Service).
+func (c *MockClient) LinkEmailToAccount(_ context.Context, _ string, email, _ string) error {
+	if email == "" {
+		return fmt.Errorf("email is required")
+	}
+	return nil
+}
+
+// ChangeTelegramAccount имитирует изменение Telegram identity (для dev, без Auth Service).
+func (c *MockClient) ChangeTelegramAccount(_ context.Context, _ string, data domain.TelegramAuthData) error {
+	if data.TelegramID == "" || data.FirstName == "" {
+		return fmt.Errorf("telegram id and first name are required")
+	}
+	return nil
+}
+
+// ChangePassword имитирует смену пароля (для dev, без Auth Service).
+func (c *MockClient) ChangePassword(_ context.Context, _ string, currentPassword, _ string) error {
+	if currentPassword == "" {
+		return fmt.Errorf("current password is required")
+	}
+	return nil
+}
+
 // compile-time check
 var _ ports.AuthCommandsClient = (*MockClient)(nil)
 var _ ports.AuthUserCommandsClient = (*MockClient)(nil)

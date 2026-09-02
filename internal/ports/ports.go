@@ -100,6 +100,16 @@ type AuthUserCommandsClient interface {
 	// GetUserProfile возвращает полный профиль пользователя (email, username, nickname, фото, telegram).
 	// accessToken — User JWT, форвардится в Auth Service для авторизации.
 	GetUserProfile(ctx context.Context, accessToken string) (domain.UserProfile, error)
+	// LinkEmailToAccount привязывает email к аккаунту (в т.ч. для telegram-аккаунтов).
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	// password может быть пустым (email-only: пароль и origin не меняются).
+	LinkEmailToAccount(ctx context.Context, accessToken, email, password string) error
+	// ChangeTelegramAccount меняет/обновляет Telegram identity пользователя (свежие данные
+	// от виджета приоритетны; старые данные аудируются). accessToken — User JWT.
+	ChangeTelegramAccount(ctx context.Context, accessToken string, data domain.TelegramAuthData) error
+	// ChangePassword меняет пароль пользователя (проверяет текущий пароль).
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	ChangePassword(ctx context.Context, accessToken, currentPassword, newPassword string) error
 }
 
 // NotificationsPublisher — порт отправки уведомлений через Kafka (п.11.2 ТЗ).

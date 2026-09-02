@@ -71,6 +71,15 @@ func NewRouter(
 		// Обновление отображаемого имени (nickname) профиля → Auth Service
 		api.POST("/settings/nickname", h.API.ChangeNickname)
 
+		// Привязка email к аккаунту (в т.ч. для telegram-аккаунтов) → Auth Service
+		api.POST("/settings/email", h.API.LinkEmail)
+
+		// Смена Telegram identity пользователя (виджет) → Auth Service
+		api.POST("/settings/telegram-account", h.API.ChangeTelegramAccount)
+
+		// Смена пароля пользователя → Auth Service
+		api.POST("/settings/password", h.API.ChangePassword)
+
 		// POST /barcode/generate — требует X-Idempotency-Key (п.14.1 ТЗ)
 		api.POST("/barcode/generate",
 			idempotencyKeyRequired(enableIdempotency),

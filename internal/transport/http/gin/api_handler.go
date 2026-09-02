@@ -354,3 +354,139 @@ func (h *APIHandler) ChangeNickname(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "nickname": req.Nickname})
 }
+
+// linkEmailRequest — тело POST /api/v1/settings/email.
+// password опционален: если не передан — привязываем только email (email-only).
+type linkEmailRequest struct {
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password"`
+}
+
+// LinkEmail — POST /api/v1/settings/email (защищён User JWT).
+// Привязывает email к аккаунту (в т.ч. для telegram-аккаунтов), проксируя в Auth Service.
+func (h *APIHandler) LinkEmail(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	var req linkEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError("email is required"))
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		RespondError(c, domain.NewValidationError("email is required"))
+		return
+	}
+
+	if err := h.authUser.LinkEmailToAccount(c.Request.Context(), token, email, req.Password); err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to link email: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "email": email})
+}
+
+// changeTelegramAccountRequest — тело POST /api/v1/settings/telegram-account.
+// Данные, которые Telegram-виджет прислал на data-auth-url GET-параметрами.
+type changeTelegramAccountRequest struct {
+	ID        string `json:"id" binding:"required"`
+	FirstName string `json:"first_name" binding:"required"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+	PhotoURL  string `json:"photo_url"`
+	AuthDate  string `json:"auth_date" binding:"required"`
+	Hash      string `json:"hash" binding:"required"`
+}
+
+// ChangeTelegramAccount — POST /api/v1/settings/telegram-account (защищён User JWT).
+// Меняет/обновляет Telegram identity пользователя (свежие данные виджета приоритетны;
+// старые данные аудируются в Auth), проксируя в Auth Service.
+func (h *APIHandler) ChangeTelegramAccount(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	var req changeTelegramAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError("invalid telegram data"))
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	if err := h.authUser.ChangeTelegramAccount(c.Request.Context(), token, domain.TelegramAuthData{
+		TelegramID: req.ID,
+		FirstName:  req.FirstName,
+		LastName:   req.LastName,
+		Username:   req.Username,
+		PhotoURL:   req.PhotoURL,
+		AuthDate:   req.AuthDate,
+		Hash:       req.Hash,
+	}); err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to change telegram account: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// changePasswordRequest — тело POST /api/v1/settings/password.
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
+// ChangePassword — POST /api/v1/settings/password (защищён User JWT).
+// Меняет пароль пользователя (Auth проверяет текущий пароль), проксируя в Auth Service.
+func (h *APIHandler) ChangePassword(c *gin.Context) {
+	if h.authUser == nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
+		return
+	}
+
+	var req changePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError("current_password and new_password are required"))
+		return
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token = authHeader[7:]
+	}
+	if token == "" {
+		RespondError(c, domain.NewValidationError("unauthorized"))
+		return
+	}
+
+	if err := h.authUser.ChangePassword(c.Request.Context(), token, req.CurrentPassword, req.NewPassword); err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to change password: %w", err)))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
