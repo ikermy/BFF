@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package auth;
 
+option go_package = "github.com/ikermy/BFF/internal/adapters/auth/pb";
+
 service AuthService {
     rpc login(LoginRequest) returns (LoginResponse);
     rpc register(RegisterRequest) returns (RegisterResponse);
@@ -22,16 +24,16 @@ service AuthService {
     rpc changeTelegramAccount(ChangeTelegramAccountRequest) returns (ChangeTelegramAccountResponse);
     rpc terminateAllSessions(TerminateAllSessionsRequest) returns (TerminateAllSessionsResponse);
     rpc linkEmailToAccount(LinkEmailRequest) returns (LinkEmailResponse);
-    rpc syncUsername(SyncUsernameRequest) returns (SyncUsernameResponse);
     
     // User identity management
-    rpc changeUsername(ChangeUsernameRequest) returns (ChangeUsernameResponse);
     rpc changeNickname(ChangeNicknameRequest) returns (ChangeNicknameResponse);
-    rpc changeTelegramUsername(ChangeTelegramUsernameRequest) returns (ChangeTelegramUsernameResponse);
     rpc changeAvatar(ChangeAvatarRequest) returns (ChangeAvatarResponse);
     rpc getUserIdentity(GetUserIdentityRequest) returns (GetUserIdentityResponse);
     rpc getUserProfile(GetUserProfileRequest) returns (GetUserProfileResponse);
     rpc suggestUsernameAlternatives(SuggestUsernameAlternativesRequest) returns (SuggestUsernameAlternativesResponse);
+
+    // История изменений Linked Telegram Username текущего пользователя (для Settings)
+    rpc getMyTelegramUsernameHistory(GetMyTelegramUsernameHistoryRequest) returns (GetMyTelegramUsernameHistoryResponse);
 
     // Two-Factor Authentication
     rpc enable2FA(Enable2FARequest) returns (Enable2FAResponse);
@@ -230,31 +232,6 @@ message LinkEmailResponse {
     string message = 2;
 }
 
-// Sync User Username with Telegram data
-message SyncUsernameRequest {
-    string user_id = 1; // max 100 chars
-}
-
-message SyncUsernameResponse {
-    bool success = 1;
-    string message = 2;
-    string username = 3; // Updated username
-}
-
-// User identity management messages
-message ChangeUsernameRequest {
-    string user_id = 1; // max 100 chars
-    string new_username = 2; // max 50 chars
-}
-
-message ChangeUsernameResponse {
-    bool success = 1;
-    string message = 2;
-    string username = 3; // Updated username
-    bool has_alternatives = 4; // Whether alternative usernames are available
-    repeated string alternative_usernames = 5; // Suggested alternative usernames
-}
-
 message ChangeNicknameRequest {
     string user_id = 1; // max 100 chars
     string new_nickname = 2; // max 100 chars
@@ -264,17 +241,6 @@ message ChangeNicknameResponse {
     bool success = 1;
     string message = 2;
     string nickname = 3; // Updated nickname
-}
-
-message ChangeTelegramUsernameRequest {
-    string user_id = 1; // max 100 chars
-    string telegram_username = 2; // max 50 chars (без @)
-}
-
-message ChangeTelegramUsernameResponse {
-    bool success = 1;
-    string message = 2;
-    string telegram_username = 3; // Updated telegram username
 }
 
 message ChangeAvatarRequest {
@@ -316,6 +282,27 @@ message GetUserProfileResponse {
     string telegram_photo_url = 10; // URL фото из Telegram (или пусто)
     string origin = 11; // Способ создания аккаунта: email | telegram
     bool is_telegram_verified = 12; // Признак подтверждённого Telegram
+}
+
+message TelegramUsernameHistoryEntry {
+    string id = 1;
+    string telegram_username = 2; // новое значение (пусто для removed)
+    string previous_telegram_username = 3; // предыдущее значение (пусто)
+    string event_type = 4; // set | changed | removed | migrated
+    string source = 5; // telegram_widget | audit_migration
+    string changed_at = 6; // ISO timestamp
+}
+
+message GetMyTelegramUsernameHistoryRequest {
+    int32 page = 1; // 1-based, default 1
+    int32 limit = 2; // default 20, max 100
+}
+
+message GetMyTelegramUsernameHistoryResponse {
+    repeated TelegramUsernameHistoryEntry entries = 1;
+    int32 total = 2;
+    int32 page = 3;
+    int32 limit = 4;
 }
 
 message SuggestUsernameAlternativesRequest {

@@ -143,17 +143,37 @@ func (c *GRPCClient) ChangeNickname(ctx context.Context, accessToken, newNicknam
 	return nil
 }
 
-// ChangeTelegramUsername обновляет Telegram username профиля через auth.changeTelegramUsername (gRPC).
+// GetMyTelegramUsernameHistory возвращает историю изменений Telegram username
+// текущего пользователя через auth.getMyTelegramUsernameHistory (gRPC).
 // accessToken форвардится как User JWT (authorization metadata) для GrpcAuthGuard.
-func (c *GRPCClient) ChangeTelegramUsername(ctx context.Context, accessToken, telegramUsername string) error {
+func (c *GRPCClient) GetMyTelegramUsernameHistory(ctx context.Context, accessToken string, page, limit int) (domain.TelegramUsernameHistoryPage, error) {
 	outCtx := metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+accessToken)
-	_, err := c.client.ChangeTelegramUsername(outCtx, &pb.ChangeTelegramUsernameRequest{
-		TelegramUsername: telegramUsername,
+	resp, err := c.client.GetMyTelegramUsernameHistory(outCtx, &pb.GetMyTelegramUsernameHistoryRequest{
+		Page:  int32(page),
+		Limit: int32(limit),
 	})
 	if err != nil {
-		return fmt.Errorf("auth: change telegram username: %w", err)
+		return domain.TelegramUsernameHistoryPage{}, fmt.Errorf("auth: get telegram username history: %w", err)
 	}
-	return nil
+
+	entries := make([]domain.TelegramUsernameHistoryEntry, 0, len(resp.GetEntries()))
+	for _, e := range resp.GetEntries() {
+		entries = append(entries, domain.TelegramUsernameHistoryEntry{
+			ID:                       e.GetId(),
+			TelegramUsername:         e.GetTelegramUsername(),
+			PreviousTelegramUsername: e.GetPreviousTelegramUsername(),
+			EventType:                e.GetEventType(),
+			Source:                   e.GetSource(),
+			ChangedAt:                e.GetChangedAt(),
+		})
+	}
+
+	return domain.TelegramUsernameHistoryPage{
+		Entries: entries,
+		Total:   int(resp.GetTotal()),
+		Page:    int(resp.GetPage()),
+		Limit:   int(resp.GetLimit()),
+	}, nil
 }
 
 // GetUserProfile возвращает полный профиль пользователя через auth.getUserProfile (gRPC).

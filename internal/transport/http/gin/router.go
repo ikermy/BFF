@@ -65,11 +65,11 @@ func NewRouter(
 		// Обновление фотографии профиля (base64 data URL) → Auth Service
 		api.POST("/settings/avatar", h.API.ChangeAvatar)
 
-		// Обновление Telegram username профиля → Auth Service
-		api.POST("/settings/telegram", h.API.ChangeTelegramUsername)
-
 		// Обновление отображаемого имени (nickname) профиля → Auth Service
 		api.POST("/settings/nickname", h.API.ChangeNickname)
+
+		// История изменений Telegram username текущего пользователя → Auth Service
+		api.GET("/settings/telegram-username-history", h.API.GetMyTelegramUsernameHistory)
 
 		// Привязка email к аккаунту (в т.ч. для telegram-аккаунтов) → Auth Service
 		api.POST("/settings/email", h.API.LinkEmail)

@@ -278,22 +278,11 @@ func (h *APIHandler) GetUserProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, profile)
 }
 
-// changeTelegramUsernameRequest — тело POST /api/v1/settings/telegram.
-type changeTelegramUsernameRequest struct {
-	TelegramUsername string `json:"telegram" binding:"required"`
-}
-
-// ChangeTelegramUsername — POST /api/v1/settings/telegram (защищён User JWT).
-// Обновляет Telegram username профиля (без @), проксируя в Auth Service.
-func (h *APIHandler) ChangeTelegramUsername(c *gin.Context) {
+// GetMyTelegramUsernameHistory — GET /api/v1/settings/telegram-username-history (защищён User JWT).
+// Возвращает историю изменений Telegram username текущего пользователя.
+func (h *APIHandler) GetMyTelegramUsernameHistory(c *gin.Context) {
 	if h.authUser == nil {
 		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
-		return
-	}
-
-	var req changeTelegramUsernameRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		RespondError(c, domain.NewValidationError("telegram is required"))
 		return
 	}
 
@@ -307,15 +296,16 @@ func (h *APIHandler) ChangeTelegramUsername(c *gin.Context) {
 		return
 	}
 
-	clean := strings.TrimSpace(req.TelegramUsername)
-	clean = strings.TrimPrefix(clean, "@")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
-	if err := h.authUser.ChangeTelegramUsername(c.Request.Context(), token, clean); err != nil {
-		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to update telegram username: %w", err)))
+	history, err := h.authUser.GetMyTelegramUsernameHistory(c.Request.Context(), token, page, limit)
+	if err != nil {
+		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("failed to get telegram username history: %w", err)))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "telegramUsername": clean})
+	c.JSON(http.StatusOK, history)
 }
 
 // changeNicknameRequest — тело POST /api/v1/settings/nickname.

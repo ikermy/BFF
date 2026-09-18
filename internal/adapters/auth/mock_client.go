@@ -88,11 +88,6 @@ func (c *MockClient) ChangeAvatar(_ context.Context, _ string, photoBase64 strin
 	return nil
 }
 
-// ChangeTelegramUsername имитирует обновление Telegram username (для dev, без Auth Service).
-func (c *MockClient) ChangeTelegramUsername(_ context.Context, _ string, telegramUsername string) error {
-	return nil
-}
-
 // ChangeNickname имитирует обновление отображаемого имени (для dev, без Auth Service).
 func (c *MockClient) ChangeNickname(_ context.Context, _ string, _ string) error {
 	return nil
@@ -104,6 +99,22 @@ func (c *MockClient) GetUserProfile(_ context.Context, _ string) (domain.UserPro
 		UserID:   "mock-user-1",
 		Email:    "mock@example.com",
 		Username: "mockuser",
+	}, nil
+}
+
+// GetMyTelegramUsernameHistory имитирует получение истории Telegram username (для dev).
+func (c *MockClient) GetMyTelegramUsernameHistory(_ context.Context, _ string, page, limit int) (domain.TelegramUsernameHistoryPage, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	return domain.TelegramUsernameHistoryPage{
+		Entries: []domain.TelegramUsernameHistoryEntry{},
+		Total:   0,
+		Page:    page,
+		Limit:   limit,
 	}, nil
 }
 

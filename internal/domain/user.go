@@ -45,3 +45,21 @@ type TelegramAuthData struct {
 	AuthDate   string `json:"auth_date"`
 	Hash       string `json:"hash"`
 }
+
+// TelegramUsernameHistoryEntry — одно событие истории Linked Telegram Username.
+type TelegramUsernameHistoryEntry struct {
+	ID                       string `json:"id"`
+	TelegramUsername         string `json:"telegramUsername"`
+	PreviousTelegramUsername string `json:"previousTelegramUsername"`
+	EventType                string `json:"eventType"`
+	Source                   string `json:"source"`
+	ChangedAt                string `json:"changedAt"`
+}
+
+// TelegramUsernameHistoryPage — страница истории Linked Telegram Username.
+type TelegramUsernameHistoryPage struct {
+	Entries []TelegramUsernameHistoryEntry `json:"entries"`
+	Total   int                            `json:"total"`
+	Page    int                            `json:"page"`
+	Limit   int                            `json:"limit"`
+}

@@ -94,12 +94,12 @@ type AuthUserCommandsClient interface {
 	// ChangeNickname обновляет отображаемое имя (nickname) профиля.
 	// accessToken — User JWT, форвардится в Auth Service для авторизации.
 	ChangeNickname(ctx context.Context, accessToken, newNickname string) error
-	// ChangeTelegramUsername обновляет Telegram username профиля (без @; пустая строка — удалить).
-	// accessToken — User JWT, форвардится в Auth Service для авторизации.
-	ChangeTelegramUsername(ctx context.Context, accessToken, telegramUsername string) error
 	// GetUserProfile возвращает полный профиль пользователя (email, username, nickname, фото, telegram).
 	// accessToken — User JWT, форвардится в Auth Service для авторизации.
 	GetUserProfile(ctx context.Context, accessToken string) (domain.UserProfile, error)
+	// GetMyTelegramUsernameHistory возвращает историю изменений Telegram username текущего пользователя.
+	// accessToken — User JWT, форвардится в Auth Service для авторизации.
+	GetMyTelegramUsernameHistory(ctx context.Context, accessToken string, page, limit int) (domain.TelegramUsernameHistoryPage, error)
 	// LinkEmailToAccount привязывает email к аккаунту (в т.ч. для telegram-аккаунтов).
 	// accessToken — User JWT, форвардится в Auth Service для авторизации.
 	// password может быть пустым (email-only: пароль и origin не меняются).

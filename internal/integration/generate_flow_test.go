@@ -175,7 +175,7 @@ func newTestEnv(t *testing.T, unitPrice float64) *testEnv {
 	bulkHandler := kafkatransport.NewBulkJobHandler(generateCase, publisher)
 	bulkConsumer := kafkaadapter.NewMockConsumer(bulkHandler.Handle, 64)
 
-	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient)
+	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient, auth.NewMockClient())
 	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase, revisionStore, revisionSchemaCase, barcodeClient)
 	adminHandler := gintransport.NewAdminHandler(topupStore, kafkaTopicsStore, timeoutStore, revisionStore)
 
