@@ -444,13 +444,16 @@ func (h *APIHandler) ChangeTelegramAccount(c *gin.Context) {
 }
 
 // changePasswordRequest — тело POST /api/v1/settings/password.
+// current_password может быть пустым для Telegram-аккаунта, который ещё не
+// задавал пароль (Auth выполняет установку пароля, а не смену).
 type changePasswordRequest struct {
-	CurrentPassword string `json:"current_password" binding:"required"`
+	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password" binding:"required"`
 }
 
 // ChangePassword — POST /api/v1/settings/password (защищён User JWT).
-// Меняет пароль пользователя (Auth проверяет текущий пароль), проксируя в Auth Service.
+// Меняет/устанавливает пароль пользователя (Auth проверяет текущий пароль для
+// аккаунтов, где он уже задан), проксируя в Auth Service.
 func (h *APIHandler) ChangePassword(c *gin.Context) {
 	if h.authUser == nil {
 		RespondError(c, domain.NewBarcodeGenError(fmt.Errorf("auth user service is not configured")))
@@ -459,7 +462,7 @@ func (h *APIHandler) ChangePassword(c *gin.Context) {
 
 	var req changePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		RespondError(c, domain.NewValidationError("current_password and new_password are required"))
+		RespondError(c, domain.NewValidationError("new_password is required"))
 		return
 	}
 
