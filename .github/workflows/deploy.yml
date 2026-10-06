@@ -1,199 +1,48 @@
-﻿name: Deploy BFF Production
+﻿name: CD BFF
+
 on:
   push:
-    branches:
-      - master
-env:
-  REGISTRY: ghcr.io
-  IMAGE: bff
+    branches: [ master, main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  build-and-push:
+  build-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and push BFF API image
+
+      - name: Build & push BFF API
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           target: api
-          push: true
           platforms: linux/amd64
+          push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}:prod
-      - name: Build and push BFF Worker image
+            ghcr.io/${{ github.repository_owner }}/bff:latest
+            ghcr.io/${{ github.repository_owner }}/bff:${{ github.sha }}
+
+      - name: Build & push BFF Worker
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           target: worker
-          push: true
           platforms: linux/amd64
+          push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}-worker:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}-worker:prod
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Copy compose & configs to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml,docker-compose.prod.yml,envoy/,configs/,db/,prometheus/"
-          target: "/barcode/bff"
-      - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            cd /barcode/bff
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            mkdir -p envoy configs
-            # Prometheus config пишем детерминированно на сервере (scp иногда копирует
-            # prometheus.yml как каталог — ломает файловый mount). Перезаписываем начисто.
-            rm -rf prometheus
-            mkdir -p prometheus
-            cat > prometheus/prometheus.yml <<'YAML'
-            global:
-              scrape_interval: 15s
-              evaluation_interval: 15s
-
-            scrape_configs:
-              - job_name: 'prometheus'
-                static_configs:
-                  - targets: ['localhost:9090']
-              - job_name: 'bff'
-                static_configs:
-                  - targets: ['bff:8080']
-                metrics_path: '/metrics'
-                scrape_interval: 10s
-                scrape_timeout: 5s
-              - job_name: 'auth-microservice'
-                static_configs:
-                  - targets: ['auth-service:50051']
-                metrics_path: '/metrics'
-                scrape_interval: 10s
-                scrape_timeout: 5s
-              - job_name: 'envoy'
-                static_configs:
-                  - targets: ['envoy:9901']
-                metrics_path: '/stats/prometheus'
-                scrape_interval: 10s
-                scrape_timeout: 5s
-              - job_name: 'postgres'
-                static_configs:
-                  - targets: ['postgres-exporter:9187']
-                scrape_interval: 30s
-                scrape_timeout: 5s
-              - job_name: 'redis'
-                static_configs:
-                  - targets: ['redis-exporter:9121']
-                scrape_interval: 30s
-                scrape_timeout: 5s
-            YAML
-
-            # ── Общая сеть платформы (оркестратор создаёт её первой) ──
-            docker network inspect barcode_shared >/dev/null 2>&1 || docker network create barcode_shared
-
-            # ── .env доступен по пути /barcode/bff/.env ──
-            echo "DOCKER_IMAGE=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}:${{ github.sha }}" > .env
-            echo "DOCKER_IMAGE_WORKER=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE }}-worker:${{ github.sha }}" >> .env
-            echo "BFF_PORT=8080" >> .env
-            echo "UNIT_PRICE=${{ vars.UNIT_PRICE }}" >> .env
-            # Обязательные для прод; при пустом секрете используется дефолт compose (тестовый запуск).
-            echo "INTERNAL_SERVICE_JWT=${{ secrets.INTERNAL_SERVICE_JWT }}" >> .env
-            echo "ADMIN_JWT=${{ secrets.ADMIN_JWT }}" >> .env
-            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
-            echo "JWT_ACCESS_SECRET=${{ secrets.JWT_ACCESS_SECRET }}" >> .env
-            echo "BARCODEGEN_MODE=${{ vars.BARCODEGEN_MODE }}" >> .env
-            echo "BARCODEGEN_URL=${{ secrets.BARCODEGEN_URL }}" >> .env
-            echo "BARCODEGEN_RAW_URL=${{ secrets.BARCODEGEN_RAW_URL }}" >> .env
-            echo "BILLING_URL=${{ secrets.BILLING_URL }}" >> .env
-            echo "BILLING_INTERNAL_API_KEY=${{ secrets.BILLING_INTERNAL_API_KEY }}" >> .env
-            echo "AI_URL=${{ secrets.AI_URL }}" >> .env
-            echo "HISTORY_URL=${{ secrets.HISTORY_URL }}" >> .env
-            echo "AUTH_URL=${{ secrets.AUTH_URL }}" >> .env
-            # gRPC-эндпоинт Auth Service + доверенный service key (x-service-key).
-            # AUTH_SERVICE_KEY ОБЯЗАН совпадать с Auth SERVICE_API_KEYS; AUTH_GRPC_URL — с gRPC-адресом auth (auth-service:50051).
-            echo "AUTH_GRPC_URL=${{ secrets.AUTH_GRPC_URL }}" >> .env
-            echo "AUTH_SERVICE_KEY=${{ secrets.AUTH_SERVICE_KEY }}" >> .env
-            echo "NOTIFICATIONS_URL=${{ secrets.NOTIFICATIONS_URL }}" >> .env
-            echo "TRANS_HISTORY_URL=${{ secrets.TRANS_HISTORY_URL }}" >> .env
-            echo "KAFKA_BROKERS=${{ secrets.KAFKA_BROKERS }}" >> .env
-            echo "KAFKA_GROUP_ID=${{ secrets.KAFKA_GROUP_ID }}" >> .env
-            echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> .env
-            echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
-            echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-            echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
-            echo "ARTIFACT_DIR=/app/artifacts" >> .env
-            echo "ARTIFACT_PUBLIC_URL=${{ secrets.ARTIFACT_PUBLIC_URL }}" >> .env
-            echo "ENABLE_PARTIAL_SUCCESS=${{ vars.ENABLE_PARTIAL_SUCCESS }}" >> .env
-            echo "ENABLE_IDEMPOTENCY=${{ vars.ENABLE_IDEMPOTENCY }}" >> .env
-            echo "ENABLE_LEGACY_AUTH=${{ vars.ENABLE_LEGACY_AUTH }}" >> .env
-            echo "ENABLE_NOTIFICATIONS=${{ vars.ENABLE_NOTIFICATIONS }}" >> .env
-            echo "MAINTENANCE_MODE=${{ vars.MAINTENANCE_MODE }}" >> .env
-            echo "DOMAIN=${{ secrets.DOMAIN }}" >> .env
-            # Observability: Grafana admin (по умолчанию admin, задайте secret для прода).
-            echo "GRAFANA_USER=${{ vars.GRAFANA_USER }}" >> .env
-            echo "GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}" >> .env
-            chmod 600 .env
-
-            # ⚠️ Рекомендуется для прода: задать реальные значения этих секретов.
-            # При пустых значениях .env — Docker Compose применяет дефолты из docker-compose.yml.
-
-            # ── Fail-fast для критичных секретов: прод не должен молча упасть на dev-дефолтах ──
-            # JWT_SECRET ОБЯЗАН совпадать с Auth JWT_SUPER_SECRET_WORD (иначе BFF не валидирует токены локально).
-            # AUTH_SERVICE_KEY ОБЯЗАН совпадать с Auth SERVICE_API_KEYS.
-            for v in AUTH_GRPC_URL AUTH_SERVICE_KEY JWT_SECRET; do
-              if ! grep -q "^${v}=.\+" .env; then
-                echo "ERROR: ${v} пуст (не задан GitHub Actions secret) — прерываем деплой, чтобы не уйти в dev-режим" >&2
-                exit 1
-              fi
-            done
-
-            # ── Деплой приложения (образы тянутся из ghcr.io, на сервере не собираются) ──
-            docker compose -f docker-compose.yml pull bff worker postgres
-            # Поднимаем инфраструктуру + БД + миграцию, затем приложение.
-            docker compose -f docker-compose.yml up -d postgres
-            docker compose -f docker-compose.yml run --rm migrate
-            docker compose -f docker-compose.yml up -d bff worker kafka redis zookeeper
-            docker compose -f docker-compose.yml ps
-            docker run --rm --network barcode_shared curlimages/curl:8.10.1 -fsS http://bff:8080/health >/dev/null
-
-            # ── Envoy (prod): TLS-терминация + маршрутизация на bff/frontend ──
-            # Убрать ручной/застрявший envoy, чтобы compose мог создать контейнер с этим именем.
-            docker rm -f barcode_envoy 2>/dev/null || true
-            # Первичное получение Let's Encrypt-сертификата, если его ещё нет.
-            if ! docker run --rm -v bff_certbot_certs:/certs alpine sh -c 'test -d /certs/live' >/dev/null 2>&1; then
-              echo "Obtaining Let's Encrypt certificate for ${{ secrets.DOMAIN }}..."
-              # bash-вызов: scp не сохраняет бит исполнения (x).
-              DOMAIN="${{ secrets.DOMAIN }}" bash ./envoy/certbot-init.sh \
-                || echo "certbot-init failed (проверьте DNS/порт 80); сертификат нужно получить вручную"
-            fi
-            # Поднимаем observability (pgadmin/prometheus/grafana/экспортёры) + envoy + acme + certbot (прод-конфиг).
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d pgadmin prometheus grafana postgres-exporter redis-exporter envoy acme_http certbot
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml ps pgadmin prometheus grafana postgres-exporter redis-exporter envoy acme_http certbot
-            docker image prune -f
+            ghcr.io/${{ github.repository_owner }}/bff-worker:latest
+            ghcr.io/${{ github.repository_owner }}/bff-worker:${{ github.sha }}
