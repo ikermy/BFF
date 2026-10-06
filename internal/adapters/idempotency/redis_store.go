@@ -96,9 +96,32 @@ func (s *RedisStore) Set(ctx context.Context, key string, body []byte) error {
 // Delete удаляет in-flight маркер, освобождая ключ для повторного запроса.
 // Вызывается middleware при ошибке хендлера (не-2xx): без этого маркер
 // блокирует все ретраи с тем же X-Idempotency-Key до истечения TTL.
+// Checkpoints (key+":cp:"+name) намеренно НЕ удаляются: они должны пережить
+// сбой, чтобы повторная попытка переиспользовала accepted derive (ПЛАН §3.3).
 func (s *RedisStore) Delete(ctx context.Context, key string) error {
 	if err := s.client.Del(ctx, keyPrefix+key).Err(); err != nil {
 		return fmt.Errorf("idempotency: redis del: %w", err)
 	}
 	return nil
+}
+
+// SetCheckpoint сохраняет accepted derive checkpoint (ПЛАН §3.3).
+// TypeScript: redis.set(`idempotency:${key}:cp:${name}`, data, 'EX', ttl)
+func (s *RedisStore) SetCheckpoint(ctx context.Context, key, name string, data []byte) error {
+	if err := s.client.Set(ctx, keyPrefix+checkpointKey(key, name), data, s.ttl).Err(); err != nil {
+		return fmt.Errorf("idempotency: redis set checkpoint: %w", err)
+	}
+	return nil
+}
+
+// GetCheckpoint читает accepted derive checkpoint: (nil, false, nil) если нет.
+func (s *RedisStore) GetCheckpoint(ctx context.Context, key, name string) ([]byte, bool, error) {
+	val, err := s.client.Get(ctx, keyPrefix+checkpointKey(key, name)).Bytes()
+	if err == redis.Nil {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("idempotency: redis get checkpoint: %w", err)
+	}
+	return val, true, nil
 }

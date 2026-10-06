@@ -22,7 +22,7 @@ import (
 	"github.com/ikermy/BFF/internal/adapters/history"
 	"github.com/ikermy/BFF/internal/adapters/idempotency"
 	kafkaadapter "github.com/ikermy/BFF/internal/adapters/kafka"
-	"github.com/ikermy/BFF/internal/adapters/revisions"
+	"github.com/ikermy/BFF/internal/adapters/revisions/revisionstest"
 	"github.com/ikermy/BFF/internal/adapters/timeouts"
 	"github.com/ikermy/BFF/internal/adapters/topupbonus"
 	"github.com/ikermy/BFF/internal/domain"
@@ -154,7 +154,7 @@ func newTestEnv(t *testing.T, unitPrice float64) *testEnv {
 	billingClient := billing.NewMockClient(unitPrice)
 	barcodeClient := barcodegen.NewMockClient()
 	historyClient := history.NewMockClient()
-	revisionStore := revisions.NewMemoryStore()
+	revisionStore := revisionstest.MustLoad(t)
 	idempotencyStore := idempotency.NewMemoryStore(24 * time.Hour)
 
 	quoteCase := usecase.NewQuoteUseCase(billingClient)

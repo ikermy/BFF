@@ -31,6 +31,15 @@ const (
 	// (в ядре BarcodeGen raw-функции нет, отчёт §4.2 п.7).
 	EnvBarcodeGenRawURL = "BARCODEGEN_RAW_URL"
 
+	// EnvBarcodeGenServiceToken — общий секрет BFF↔BarcodeGen для internal namespace
+	// /api/internal/v1/barcodes/* (BARCODEGEN_MODE=internal). Должен совпадать с
+	// BARCODEGEN_SERVICE_TOKEN в BarcodeGen.
+	EnvBarcodeGenServiceToken = "BARCODEGEN_SERVICE_TOKEN"
+
+	// EnvMaxIssueDateAttempts — лимит повторов date-step [DBD,DBA] в prepare/auto
+	// (МИКРО_ТЗ_ВАЛИДАТОР_СГЕНЕРИРОВАННЫХ_ДАТ.md). По умолчанию 20.
+	EnvMaxIssueDateAttempts = "MAX_ISSUE_DATE_ATTEMPTS"
+
 	// D2, этап 2: перекладка сгенерированных PNG в стабильное хранилище.
 	EnvArtifactDir        = "ARTIFACT_DIR"        // куда складывать артефакты (общий volume / S3 mount)
 	EnvArtifactPublicBase = "ARTIFACT_PUBLIC_URL" // базовый публичный URL для артефактов
@@ -134,38 +143,42 @@ type FeatureFlags struct {
 
 // Config — runtime-конфигурация BFF из ENV и флагов приложения.
 type Config struct {
-	Port               string
-	InternalServiceJWT string
-	AdminJWT           string
-	JWTSecret          string // JWT_SECRET — shared secret для локальной JWT-валидации (grpc_kafka_fixes.md §1.1)
-	JWTAccessSecret    string // JWT_ACCESS_SECRET — секрет минта сервисных JWT для legacy BarcodeGen (fallback JWT_SECRET)
-	BarcodeGenMode     string // BARCODEGEN_MODE — "native" | "legacy"
-	BarcodeGenRawURL   string // BARCODEGEN_RAW_URL — barcode-raw-svc для GenerateRaw
-	ArtifactDir        string // ARTIFACT_DIR — куда перекладывать PNG (D2 этап 2)
-	ArtifactPublicBase string // ARTIFACT_PUBLIC_URL — публичный base URL артефактов
-	UnitPrice          float64
-	MaintenanceMode    bool
-	Services           Services
-	Kafka              Kafka
-	Redis              Redis
-	Timeouts           Timeouts
-	Idempotency        Idempotency
-	Features           FeatureFlags
+	Port                   string
+	InternalServiceJWT     string
+	AdminJWT               string
+	JWTSecret              string // JWT_SECRET — shared secret для локальной JWT-валидации (grpc_kafka_fixes.md §1.1)
+	JWTAccessSecret        string // JWT_ACCESS_SECRET — секрет минта сервисных JWT для legacy BarcodeGen (fallback JWT_SECRET)
+	BarcodeGenMode         string // BARCODEGEN_MODE — "native" | "legacy" | "internal"
+	BarcodeGenRawURL       string // BARCODEGEN_RAW_URL — barcode-raw-svc для GenerateRaw
+	BarcodeGenServiceToken string // BARCODEGEN_SERVICE_TOKEN — секрет internal namespace
+	MaxIssueDateAttempts   int    // MAX_ISSUE_DATE_ATTEMPTS — лимит повторов date-step (default 20)
+	ArtifactDir            string // ARTIFACT_DIR — куда перекладывать PNG (D2 этап 2)
+	ArtifactPublicBase     string // ARTIFACT_PUBLIC_URL — публичный base URL артефактов
+	UnitPrice              float64
+	MaintenanceMode        bool
+	Services               Services
+	Kafka                  Kafka
+	Redis                  Redis
+	Timeouts               Timeouts
+	Idempotency            Idempotency
+	Features               FeatureFlags
 }
 
 func Load() Config {
 	return Config{
-		Port:               getEnv(EnvPort, "8080"),
-		InternalServiceJWT: getEnv(EnvInternalServiceJWT, "dev-internal-token"),
-		AdminJWT:           getEnv(EnvAdminJWT, "dev-admin-token"),
-		JWTSecret:          getEnv(EnvJWTSecret, "dev-jwt-secret"),
-		JWTAccessSecret:    getEnv(EnvJWTAccessSecret, getEnv(EnvJWTSecret, "dev-jwt-secret")),
-		BarcodeGenMode:     getEnv(EnvBarcodeGenMode, "native"),
-		BarcodeGenRawURL:   getEnv(EnvBarcodeGenRawURL, ""),
-		ArtifactDir:        getEnv(EnvArtifactDir, ""),
-		ArtifactPublicBase: getEnv(EnvArtifactPublicBase, ""),
-		UnitPrice:          getEnvFloat(EnvUnitPrice, 0.50),
-		MaintenanceMode:    getEnvBool(EnvMaintenanceMode, false),
+		Port:                   getEnv(EnvPort, "8080"),
+		InternalServiceJWT:     getEnv(EnvInternalServiceJWT, "dev-internal-token"),
+		AdminJWT:               getEnv(EnvAdminJWT, "dev-admin-token"),
+		JWTSecret:              getEnv(EnvJWTSecret, "dev-jwt-secret"),
+		JWTAccessSecret:        getEnv(EnvJWTAccessSecret, getEnv(EnvJWTSecret, "dev-jwt-secret")),
+		BarcodeGenMode:         getEnv(EnvBarcodeGenMode, "native"),
+		BarcodeGenRawURL:       getEnv(EnvBarcodeGenRawURL, ""),
+		BarcodeGenServiceToken: getEnv(EnvBarcodeGenServiceToken, ""),
+		MaxIssueDateAttempts:   getEnvInt(EnvMaxIssueDateAttempts, 20),
+		ArtifactDir:            getEnv(EnvArtifactDir, ""),
+		ArtifactPublicBase:     getEnv(EnvArtifactPublicBase, ""),
+		UnitPrice:              getEnvFloat(EnvUnitPrice, 0.50),
+		MaintenanceMode:        getEnvBool(EnvMaintenanceMode, false),
 
 		Services: Services{
 			BarcodeGenURL:      getEnv(EnvBarcodeGenURL, "http://barcodegen:8080"),
@@ -204,6 +217,15 @@ func Load() Config {
 			EnableNotifications:  getEnvBool(EnvEnableNotifications, true),
 		},
 	}
+}
+
+func getEnvInt(key string, fallback int) int {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func getEnv(key, fallback string) string {

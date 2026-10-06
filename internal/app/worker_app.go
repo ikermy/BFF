@@ -113,6 +113,9 @@ func BuildWorkerApp(cfg config.Config) *WorkerApp {
 	quoteCase := usecase.NewQuoteUseCase(billingClient).
 		WithPartialSuccessEnabled(cfg.Features.EnablePartialSuccess)
 	chainExecutor := usecase.NewChainExecutor(barcodeClient, revisionStore)
+	if deriver, ok := barcodeClient.(ports.BarcodeFieldDeriver); ok {
+		chainExecutor = chainExecutor.WithDeriver(deriver).WithDateAttempts(cfg.MaxIssueDateAttempts)
+	}
 	generateCase := usecase.NewGenerateUseCase(billingClient, barcodeClient, eventPublisher, quoteCase).
 		WithPartialSuccessEnabled(cfg.Features.EnablePartialSuccess).
 		WithChainExecutor(chainExecutor).

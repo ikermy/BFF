@@ -2,8 +2,10 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,7 +13,8 @@ import (
 	"github.com/ikermy/BFF/internal/adapters/barcodegen"
 	"github.com/ikermy/BFF/internal/adapters/billing"
 	"github.com/ikermy/BFF/internal/adapters/events"
-	"github.com/ikermy/BFF/internal/adapters/revisions"
+	"github.com/ikermy/BFF/internal/adapters/idempotency"
+	"github.com/ikermy/BFF/internal/adapters/revisions/revisionstest"
 	"github.com/ikermy/BFF/internal/domain"
 )
 
@@ -291,7 +294,7 @@ func TestGenerateUseCase_DoesNotRetryOn400(t *testing.T) {
 func TestGenerateUseCase_MinSetValidation_MissingRequired(t *testing.T) {
 	billingClient := billing.NewMockClient(0.50)
 	quoteCase := NewQuoteUseCase(billingClient)
-	revStore := revisions.NewMemoryStore() // RequiredInputFields: [firstName, lastName, dateOfBirth]
+	revStore := revisionstest.MustLoad(t) // RequiredInputFields: [firstName, lastName, dateOfBirth]
 	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), quoteCase).
 		WithRevisionStore(revStore)
 
@@ -330,7 +333,7 @@ func TestGenerateUseCase_MinSetValidation_MissingRequired(t *testing.T) {
 func TestGenerateUseCase_MinSetValidation_AllPresent(t *testing.T) {
 	billingClient := billing.NewMockClient(1.0) // полный доступ — тест проверяет только валидацию полей
 	quoteCase := NewQuoteUseCase(billingClient)
-	revStore := revisions.NewMemoryStore()
+	revStore := revisionstest.MustLoad(t)
 	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), quoteCase).
 		WithRevisionStore(revStore)
 
@@ -351,11 +354,53 @@ func TestGenerateUseCase_MinSetValidation_AllPresent(t *testing.T) {
 	}
 }
 
+// TestGenerateUseCase_StableGenerationID — generationId детерминирован по
+// X-Idempotency-Key+index и уникален для юнитов (ПЛАН §3.3).
+func TestGenerateUseCase_StableGenerationID(t *testing.T) {
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	revStore := revisionstest.MustLoad(t)
+	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), quoteCase).
+		WithRevisionStore(revStore)
+
+	req := domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417",
+		Units: 2, Confirmed: true, BuildID: "b", BatchID: "ba",
+		IdempotencyKey: "idem-stable-1",
+		Fields: map[string]any{
+			"firstName": "JOHN", "lastName": "DOE", "dateOfBirth": "1990-01-15",
+		},
+	}
+
+	first, err := generateCase.Execute(context.Background(), "u-1", req)
+	if err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	second, err := generateCase.Execute(context.Background(), "u-1", req)
+	if err != nil {
+		t.Fatalf("second Execute: %v", err)
+	}
+	if len(first.Barcodes) != 2 || len(second.Barcodes) != 2 {
+		t.Fatalf("expected 2 barcodes each, got %d and %d", len(first.Barcodes), len(second.Barcodes))
+	}
+	if first.Barcodes[0].GenerationID == "" {
+		t.Fatal("generationId must be set")
+	}
+	if first.Barcodes[0].GenerationID == first.Barcodes[1].GenerationID {
+		t.Fatal("generationId must be unique per unit")
+	}
+	for i := range first.Barcodes {
+		if first.Barcodes[i].GenerationID != second.Barcodes[i].GenerationID {
+			t.Fatalf("generationId must be stable on replay: unit %d %q vs %q", i, first.Barcodes[i].GenerationID, second.Barcodes[i].GenerationID)
+		}
+	}
+}
+
 // TestGenerateUseCase_MinSetValidation_EmptyString — пустая строка считается отсутствующей (п.5.2 ТЗ).
 func TestGenerateUseCase_MinSetValidation_EmptyString(t *testing.T) {
 	billingClient := billing.NewMockClient(1.0) // полный доступ — тест проверяет только валидацию
 	quoteCase := NewQuoteUseCase(billingClient)
-	revStore := revisions.NewMemoryStore()
+	revStore := revisionstest.MustLoad(t)
 	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), quoteCase).
 		WithRevisionStore(revStore)
 
@@ -385,7 +430,7 @@ func TestGenerateUseCase_SendsNotification_OnSuccess(t *testing.T) {
 	billingClient := billing.NewMockClient(1.0) // 100% — тест проверяет уведомления, не billing
 	quoteCase := NewQuoteUseCase(billingClient)
 	notifPublisher := events.NewMockPublisher()
-	revStore := revisions.NewMemoryStore()
+	revStore := revisionstest.MustLoad(t)
 
 	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), quoteCase).
 		WithRevisionStore(revStore).
@@ -653,6 +698,283 @@ func TestGenerateUseCase_TotalCost_Fallback_PartialBarcodeGen(t *testing.T) {
 	want := 15.00 // 60 * 25/100
 	if result.Billing.TotalCost != want {
 		t.Errorf("TotalCost (fallback, partial barcodegen): want %.2f, got %.2f", want, result.Billing.TotalCost)
+	}
+}
+
+// capturingBarcodeClient запоминает render-поля, переданные в GeneratePDF417.
+type capturingBarcodeClient struct {
+	baseBarcodeClient
+	mu         sync.Mutex
+	lastFields map[string]any
+}
+
+func (c *capturingBarcodeClient) GeneratePDF417(_ context.Context, req domain.GeneratePDF417Request) (domain.GeneratePDF417Response, error) {
+	c.mu.Lock()
+	c.lastFields = req.Fields
+	c.mu.Unlock()
+	return domain.GeneratePDF417Response{Success: true, BarcodeURL: "https://cdn.example.com/x.png", Format: "pdf417"}, nil
+}
+
+func (c *capturingBarcodeClient) GenerateCode128(_ context.Context, _ domain.GenerateCode128Request) (domain.GenerateCode128Response, error) {
+	return domain.GenerateCode128Response{Success: true, BarcodeURL: "https://cdn.example.com/c.png", Format: "code128"}, nil
+}
+
+func (c *capturingBarcodeClient) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{}, nil
+}
+
+func (c *capturingBarcodeClient) fields() map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastFields
+}
+
+// spyDeriver фиксирует факт вызова derive.
+type spyDeriver struct {
+	called bool
+}
+
+func (d *spyDeriver) Derive(_ context.Context, _, _ string, _ map[string]any, _ []string) (map[string]any, error) {
+	d.called = true
+	return nil, errors.New("derive must not be called when accepted checkpoint exists")
+}
+
+// TestGenerateUseCase_WritesAcceptedCheckpoints — после успешного auto-generate
+// под X-Idempotency-Key сохраняются derive и render checkpoints (ПЛАН §3.3).
+func TestGenerateUseCase_WritesAcceptedCheckpoints(t *testing.T) {
+	store := groupedStore(t)
+	idem := idempotency.NewMemoryStore(24 * time.Hour)
+	defer idem.Shutdown()
+
+	barcodeClient := &capturingBarcodeClient{}
+	clk := fixedClock{t: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)}
+	chain := NewChainExecutor(barcodeClient, store).WithDeriver(&scriptedDeriver{}).WithClock(clk)
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	generateCase := NewGenerateUseCase(billingClient, barcodeClient, events.NewMockPublisher(), quoteCase).
+		WithChainExecutor(chain).
+		WithRevisionStore(store).
+		WithIdempotencyStore(idem)
+
+	req := domain.GenerateRequest{
+		Revision: "US_GROUP_01012020", BarcodeType: "pdf417",
+		Units: 1, Confirmed: true, BuildID: "b", BatchID: "ba",
+		IdempotencyKey: "idem-cp-1",
+		Fields:         map[string]any{"DAJ": "AR", "DBB": "07191994"},
+	}
+	if _, err := generateCase.Execute(context.Background(), "u-1", req); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	raw, found, err := idem.GetCheckpoint(context.Background(), "idem-cp-1", deriveCheckpointName)
+	if err != nil || !found {
+		t.Fatalf("derive checkpoint missing: found=%v err=%v", found, err)
+	}
+	var cp deriveCheckpoint
+	if json.Unmarshal(raw, &cp) != nil {
+		t.Fatalf("derive checkpoint is not valid JSON: %s", raw)
+	}
+	if cp.Fields["DCK"] != "INV-1" {
+		t.Fatalf("derive checkpoint fields = %v", cp.Fields)
+	}
+	if cp.RequestHash == "" {
+		t.Fatal("derive checkpoint must carry request hash")
+	}
+	if _, found, _ := idem.GetCheckpoint(context.Background(), "idem-cp-1", renderCheckpointName); !found {
+		t.Fatal("render checkpoint missing")
+	}
+}
+
+// TestGenerateUseCase_ReusesDeriveCheckpoint — при наличии accepted derive
+// checkpoint повторный запуск НЕ вызывает derive и использует сохранённые поля.
+func TestGenerateUseCase_ReusesDeriveCheckpoint(t *testing.T) {
+	store := groupedStore(t)
+	idem := idempotency.NewMemoryStore(24 * time.Hour)
+	defer idem.Shutdown()
+
+	req := domain.GenerateRequest{
+		Revision: "US_GROUP_01012020", BarcodeType: "pdf417",
+		Units: 1, Confirmed: true, BuildID: "b", BatchID: "ba",
+		IdempotencyKey: "idem-reuse-1",
+		Fields:         map[string]any{"DAJ": "AR", "DBB": "07191994"},
+	}
+	seeded := deriveCheckpoint{
+		RequestHash: generateRequestHash(req),
+		Fields:      map[string]any{"DAJ": "AR", "DBB": "07191994", "DCK": "FROM-CHECKPOINT"},
+		Computed:    []string{"DCK"},
+	}
+	raw, _ := json.Marshal(seeded)
+	if err := idem.SetCheckpoint(context.Background(), "idem-reuse-1", deriveCheckpointName, raw); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+
+	barcodeClient := &capturingBarcodeClient{}
+	spy := &spyDeriver{}
+	chain := NewChainExecutor(barcodeClient, store).WithDeriver(spy)
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	generateCase := NewGenerateUseCase(billingClient, barcodeClient, events.NewMockPublisher(), quoteCase).
+		WithChainExecutor(chain).
+		WithRevisionStore(store).
+		WithIdempotencyStore(idem)
+
+	if _, err := generateCase.Execute(context.Background(), "u-1", req); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if spy.called {
+		t.Fatal("derive must not run when accepted checkpoint exists")
+	}
+	if got := barcodeClient.fields()["DCK"]; got != "FROM-CHECKPOINT" {
+		t.Fatalf("checkpoint fields must be reused, got DCK=%v (fields=%v)", got, barcodeClient.fields())
+	}
+}
+
+// TestGenerateUseCase_IgnoresCheckpointWithDifferentRequestHash — checkpoint от
+// другого тела запроса не переиспользуется.
+func TestGenerateUseCase_IgnoresCheckpointWithDifferentRequestHash(t *testing.T) {
+	store := groupedStore(t)
+	idem := idempotency.NewMemoryStore(24 * time.Hour)
+	defer idem.Shutdown()
+
+	seeded := deriveCheckpoint{
+		RequestHash: "deadbeef",
+		Fields:      map[string]any{"DCK": "STALE"},
+	}
+	raw, _ := json.Marshal(seeded)
+	_ = idem.SetCheckpoint(context.Background(), "idem-stale", deriveCheckpointName, raw)
+
+	barcodeClient := &capturingBarcodeClient{}
+	clk := fixedClock{t: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)}
+	chain := NewChainExecutor(barcodeClient, store).WithDeriver(&scriptedDeriver{}).WithClock(clk)
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	generateCase := NewGenerateUseCase(billingClient, barcodeClient, events.NewMockPublisher(), quoteCase).
+		WithChainExecutor(chain).
+		WithRevisionStore(store).
+		WithIdempotencyStore(idem)
+
+	req := domain.GenerateRequest{
+		Revision: "US_GROUP_01012020", BarcodeType: "pdf417",
+		Units: 1, Confirmed: true, BuildID: "b", BatchID: "ba",
+		IdempotencyKey: "idem-stale",
+		Fields:         map[string]any{"DAJ": "AR", "DBB": "07191994"},
+	}
+	if _, err := generateCase.Execute(context.Background(), "u-1", req); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := barcodeClient.fields()["DCK"]; got != "INV-1" {
+		t.Fatalf("stale checkpoint must be ignored, expected fresh derive DCK=INV-1, got %v", got)
+	}
+}
+
+// TestGenerateUseCase_PreparedRejectsInvalidClosedChoiceBeforeQuote — ПЛАН §3.3:
+// closed-choice валидация полного draft выполняется в общем finalizer до quote.
+func TestGenerateUseCase_PreparedRejectsInvalidClosedChoiceBeforeQuote(t *testing.T) {
+	store := revisionstest.MustLoad(t)
+	billingClient := billing.NewMockClient(1.0)
+	// quoter намеренно падает, если его вызовут: доказывает, что validation идёт до quote.
+	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(),
+		&mockQuoter{err: errors.New("quote must not be called")}).
+		WithRevisionStore(store)
+
+	_, err := generateCase.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417", Mode: "prepared",
+		Units: 1, Confirmed: true, BuildID: "b", BatchID: "ba",
+		Fields: map[string]any{
+			"firstName": "JOHN", "lastName": "DOE", "dateOfBirth": "1990-01-15",
+			"eyeColor": "XYZ",
+		},
+	})
+	appErr := assertAppError(t, err)
+	if appErr.HTTPStatus != 400 || appErr.Code != domain.ErrCodeValidation {
+		t.Fatalf("expected 400 %s before quote, got %d %s (%s)", domain.ErrCodeValidation, appErr.HTTPStatus, appErr.Code, appErr.Message)
+	}
+}
+
+// TestGenerateUseCase_ClosedChoiceValidPasses — валидное enum-значение не блокирует.
+func TestGenerateUseCase_ClosedChoiceValidPasses(t *testing.T) {
+	store := revisionstest.MustLoad(t)
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	generateCase := NewGenerateUseCase(billingClient, barcodegen.NewMockClient(), events.NewMockPublisher(), quoteCase).
+		WithRevisionStore(store)
+
+	res, err := generateCase.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417",
+		Units: 1, Confirmed: true, BuildID: "b", BatchID: "ba",
+		Fields: map[string]any{
+			"firstName": "JOHN", "lastName": "DOE", "dateOfBirth": "1990-01-15",
+			"eyeColor": "BLU",
+		},
+	})
+	if err != nil {
+		t.Fatalf("valid closed-choice must pass: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected success")
+	}
+}
+
+type timeoutBarcodeClient struct{ baseBarcodeClient }
+
+func (c *timeoutBarcodeClient) GeneratePDF417(_ context.Context, _ domain.GeneratePDF417Request) (domain.GeneratePDF417Response, error) {
+	return domain.GeneratePDF417Response{}, errors.New("dial tcp: i/o timeout")
+}
+func (c *timeoutBarcodeClient) GenerateCode128(_ context.Context, _ domain.GenerateCode128Request) (domain.GenerateCode128Response, error) {
+	return domain.GenerateCode128Response{}, nil
+}
+func (c *timeoutBarcodeClient) GenerateRaw(_ context.Context, _ domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {
+	return domain.GenerateRawResponse{}, nil
+}
+
+type stubReconciler struct {
+	url    string
+	status string
+}
+
+func (r *stubReconciler) RenderStatus(_ context.Context, _ string) (domain.RenderStatusResult, error) {
+	return domain.RenderStatusResult{Status: r.status, BarcodeURL: r.url, Format: "pdf417"}, nil
+}
+
+// TestGenerateUseCase_ReconcilesOnTimeout — ambiguous timeout разрешается через
+// reconciliation render registry без повторного энкодера (ПЛАН §B.5).
+func TestGenerateUseCase_ReconcilesOnTimeout(t *testing.T) {
+	store := revisionstest.MustLoad(t)
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	generateCase := NewGenerateUseCase(billingClient, &timeoutBarcodeClient{}, events.NewMockPublisher(), quoteCase).
+		WithRevisionStore(store).
+		WithRenderReconciler(&stubReconciler{url: "https://cdn.example.com/recon.png", status: "SUCCEEDED"})
+
+	res, err := generateCase.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417", Units: 1, Confirmed: true,
+		BuildID: "b", BatchID: "ba", IdempotencyKey: "idem-rec-1",
+		Fields: map[string]any{"firstName": "JOHN", "lastName": "DOE", "dateOfBirth": "01151990"},
+	})
+	if err != nil {
+		t.Fatalf("expected reconciled success, got error: %v", err)
+	}
+	if len(res.Barcodes) != 1 || res.Barcodes[0].URL != "https://cdn.example.com/recon.png" {
+		t.Fatalf("expected reconciled barcode, got %+v", res.Barcodes)
+	}
+}
+
+// TestGenerateUseCase_ReconcilerFailed — терминальный FAILED из registry → ошибка.
+func TestGenerateUseCase_ReconcilerFailed(t *testing.T) {
+	store := revisionstest.MustLoad(t)
+	billingClient := billing.NewMockClient(1.0)
+	quoteCase := NewQuoteUseCase(billingClient)
+	generateCase := NewGenerateUseCase(billingClient, &timeoutBarcodeClient{}, events.NewMockPublisher(), quoteCase).
+		WithRevisionStore(store).
+		WithRenderReconciler(&stubReconciler{status: "FAILED"})
+
+	_, err := generateCase.Execute(context.Background(), "u-1", domain.GenerateRequest{
+		Revision: "US_CA_08292017", BarcodeType: "pdf417", Units: 1, Confirmed: true,
+		BuildID: "b", BatchID: "ba", IdempotencyKey: "idem-rec-fail",
+		Fields: map[string]any{"firstName": "JOHN", "lastName": "DOE", "dateOfBirth": "01151990"},
+	})
+	if err == nil {
+		t.Fatal("expected error for FAILED render status")
 	}
 }
 

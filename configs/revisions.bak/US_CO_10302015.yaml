@@ -1,0 +1,55 @@
+name: US_CO_10302015
+displayName: "Colorado (Oct 2015)"
+enabled: true
+revisionEffectiveDate: "2015-10-30"
+supportedModes: [prepare, auto, prepared]
+renderAllowlist: [QQQ, DAC, DAD, DAG, DAI, DAJ, DAK, DAQ, DAU, DAW, DAY, DAZ, DBA, DBB, DBC, DBD, DCA, DCB, DCD, DCF, DCJ, DCL, DCS, DDA, DDB]
+defaults:
+  QQQ: "DL"
+  DAD: "NONE"
+  DCA: "C"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DAY: "BRO"
+  DAZ: "BRO"
+  DAU: "510"
+  DAW: "150"
+  DAG: "1 MAIN ST"
+  DAI: "CITY"
+  DAK: "00000"
+  DDA: "F"
+  DCL: "NONE"
+requiredRenderFields: [DCJ]
+requiredInputFields: [firstName, lastName, dateOfBirth]
+# CO: DCJ (auditCode) генерируется из DBD. Полная derive-цепочка.
+generationSteps:
+  - id: daq
+    endpoint: random
+    input: [DAJ]
+    output: [DAQ]
+  - id: dates
+    endpoint: random
+    input: [DAJ, DBB, DDA]
+    output: [DBD, DBA]
+  - id: audit
+    endpoint: random
+    input: [DAJ, DBD]
+    output: [DCJ]
+  - id: dck
+    endpoint: calculate
+    input: [DAJ, DBD, DAQ, DBA, DBB]
+    output: [DCK]
+  - id: dcf
+    endpoint: calculate
+    input: [DAJ, DBD, DBA]
+    output: [DCF]
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 2}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 3, validation: {maxDate: "today-16y"}}
+    - {name: street, type: string, required: false, label: "Street", order: 4}
+    - {name: city, type: string, required: false, label: "City", order: 5}
+    - {name: zipCode, type: string, required: false, label: "ZIP", order: 7}
+    - {name: auditCode, type: string, required: true, label: "Audit Information", order: 30}

@@ -131,6 +131,13 @@ static_resources:
                           route:
                             cluster: bff_http
                             timeout: 10s
+                        # PNG-артефакты из MinIO (S3). /storage/<bucket>/<key> → /<bucket>/<key>
+                        - match:
+                            prefix: "/storage/"
+                          route:
+                            cluster: minio_http
+                            timeout: 30s
+                            prefix_rewrite: "/"
                         # Дефолт — Nuxt-фронтенд (тот же origin, API по /api/v1)
                         - match:
                             prefix: "/"
@@ -173,6 +180,21 @@ static_resources:
                     socket_address:
                       address: frontend
                       port_value: 80
+
+    # MinIO (S3 API) — раздача PNG-артефактов по /storage/.
+    - name: minio_http
+      connect_timeout: 5s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: minio_http
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: minio
+                      port_value: 9000
 
     # nginx:alpine — отдаёт ACME challenge файлы certbot (webroot)
     - name: acme_http

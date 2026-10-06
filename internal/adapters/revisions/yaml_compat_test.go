@@ -3,17 +3,19 @@ package revisions
 import (
 	"context"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 )
 
-// TestRevisionsYAML_CAChainCompatibleWithBarcodeGen — регрессия B4 (отчёт §4.2 п.5).
+// TestRevisionsYAML_CAGenerationStepsCompatibleWithBarcodeGen — регрессия B4.
 //
-// Правка данных, не кода: calculationChain ревизий ДОЛЖЕН быть выполним на реальном
-// BarcodeGen, иначе chain-исполнение падает с FIELD_SOURCE_UNSUPPORTED.
-// calculate поддерживает только [DBA],[DCK],[DCF]; random — только 6 фиксированных
-// наборов ([DAQ], [DBB], [DAG,DAI,DAK], [DAC,DAD,DCS], [DBD,DBA], [DCJ]).
+// Правка данных, не кода: generationSteps ревизий ДОЛЖНЫ быть выполнимы на
+// реальном BarcodeGen, иначе chain-исполнение падает с FIELD_SOURCE_UNSUPPORTED.
+// calculate поддерживает только [DBA],[DCK],[DCF]; random — только фиксированные
+// наборы ([DAQ], [DBB], [DAG,DAI,DAK], [DAC,DAD,DCS], [DBD,DBA], [DCJ]).
 // Проверяем реальный YAML-файл из каталога configs/revisions.
-func TestRevisionsYAML_CAChainCompatibleWithBarcodeGen(t *testing.T) {
+func TestRevisionsYAML_CAGenerationStepsCompatibleWithBarcodeGen(t *testing.T) {
 	dir := filepath.Join("..", "..", "..", "configs", "revisions")
 	store := NewMemoryStore()
 	if err := store.LoadFromDir(dir); err != nil {
@@ -24,34 +26,52 @@ func TestRevisionsYAML_CAChainCompatibleWithBarcodeGen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConfig: %v", err)
 	}
-	if len(cfg.CalculationChain) == 0 {
-		t.Fatal("expected non-empty calculationChain loaded from YAML")
+	if len(cfg.GenerationSteps) == 0 {
+		t.Fatal("expected non-empty generationSteps loaded from YAML")
 	}
 
-	for _, step := range cfg.CalculationChain {
-		switch step.Source {
+	for _, step := range cfg.GenerationSteps {
+		switch step.Endpoint {
 		case "calculate":
-			switch step.Field {
+			// calculate умеет только одиночные поля [DBA],[DCK],[DCF].
+			if len(step.Output) != 1 {
+				t.Errorf("step %s: calculate supports single-field output, got %v", step.ID, step.Output)
+				continue
+			}
+			switch step.Output[0] {
 			case "DBA", "DCK", "DCF":
 			default:
-				t.Errorf("chain step %s: BarcodeGen calculate supports only [DBA,DCK,DCF], got %s", step.Field, step.Field)
+				t.Errorf("step %s: BarcodeGen calculate supports only [DBA,DCK,DCF], got %s", step.ID, step.Output[0])
 			}
 		case "random":
-			if !randomFieldSupported(step.Field) {
-				t.Errorf("chain step %s: not in any BarcodeGen random set", step.Field)
+			if !randomSetSupported(step.Output) {
+				t.Errorf("step %s: output %v is not a known BarcodeGen random set", step.ID, step.Output)
 			}
-		case "user":
-			// source=user — поле заполняет пользователь, BarcodeGen не вызывается. Ок.
 		default:
-			t.Errorf("chain step %s: unexpected source %q", step.Field, step.Source)
+			t.Errorf("step %s: unexpected endpoint %q", step.ID, step.Endpoint)
 		}
 	}
 }
 
-func randomFieldSupported(field string) bool {
-	switch field {
-	case "DAQ", "DBB", "DAG", "DAI", "DAK", "DAC", "DAD", "DCS", "DBD", "DBA", "DCJ":
-		return true
+// randomSetSupported — output шага должен совпадать с одним из фиксированных
+// random-наборов BarcodeGen.
+func randomSetSupported(output []string) bool {
+	sets := [][]string{
+		{"DAQ"},
+		{"DBB"},
+		{"DAG", "DAI", "DAK"},
+		{"DAC", "DAD", "DCS"},
+		{"DBD", "DBA"},
+		{"DCJ"},
+	}
+	want := append([]string(nil), output...)
+	sort.Strings(want)
+	for _, set := range sets {
+		got := append([]string(nil), set...)
+		sort.Strings(got)
+		if strings.Join(want, ",") == strings.Join(got, ",") {
+			return true
+		}
 	}
 	return false
 }

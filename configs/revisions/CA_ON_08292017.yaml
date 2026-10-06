@@ -1,0 +1,38 @@
+name: CA_ON_08292017
+displayName: "Ontario"
+enabled: true
+revisionEffectiveDate: "2017-08-29"
+country: CA
+heightCm: true
+supportedModes: [prepare, prepared]
+renderAllowlist: [DAJ, DDB, QQQ, DCA, DCB, DCD, DCS, DAC, DAD, DBB, DBC, DAY, DAU, DAG, DAI, DAK, DBD, DBA, DAQ, DCF, DCK]
+defaults:
+  QQQ: "DL"
+  DCA: "G2"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DAD: ""
+requiredInputFields: [firstName, lastName, dateOfBirth, issueDate, expirationDate, dlNumber, documentDiscriminator, inventoryNumber, street, city, zipCode, eyeColor, height]
+baseInput: [firstName, lastName, dateOfBirth, issueDate, expirationDate, dlNumber, documentDiscriminator, inventoryNumber]
+generationSteps: []
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: middleName, type: string, required: false, label: "Middle Name", order: 2}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 3}
+    - {name: street, type: string, required: true, label: "Street", order: 4}
+    - {name: city, type: string, required: true, label: "City", order: 5}
+    - {name: zipCode, type: string, required: true, label: "ZIP/Postal", order: 6}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 7, validation: {maxDate: "today-16y"}}
+    - {name: sex, type: enum, required: false, label: "Sex", order: 8, options: ["1", "2"]}
+    - {name: vehicleClass, type: enum, required: false, label: "Class", order: 9, options: ["G2", "A", "GM"]}
+    - {name: restrictions, type: enum, required: false, label: "Restrictions", order: 10, options: ["NONE"]}
+    - {name: endorsements, type: enum, required: false, label: "Endorsements", order: 11, options: ["NONE", "Z"]}
+    - {name: height, type: number, required: false, label: "Height (in)", order: 12}
+    - {name: eyeColor, type: enum, required: false, label: "Eye Color", order: 13, options: ["BLK", "BLU", "BRO", "DIC", "GRY", "GRN", "HAZ", "MAR", "PNK", "UNK"]}
+    - {name: issueDate, type: date, required: true, label: "Issue Date", order: 14}
+    - {name: expirationDate, type: date, required: true, label: "Expiration Date", order: 15}
+    - {name: dlNumber, type: string, required: true, label: "Document Number", order: 16}
+    - {name: documentDiscriminator, type: string, required: true, label: "Document Discriminator", order: 17}
+    - {name: inventoryNumber, type: string, required: true, label: "Inventory Number", order: 18}

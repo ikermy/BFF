@@ -1,0 +1,49 @@
+name: US_CA_08292017_ID
+displayName: "California ID"
+enabled: true
+revisionEffectiveDate: "2017-08-29"
+country: USA
+supportedModes: [prepare, auto, prepared]
+renderAllowlist: [DAJ, DDB, QQQ, DAQ, DBB, DDA, DBD, DBA, DCK, DCF, DCS, DAC, DAD, DBC, DAU, DAY, DAG, DAI, DAK, DCU, DAW, DAZ, DDK, DDL]
+defaults:
+  QQQ: "ID"
+  DBC: "1"
+  DDA: "F"
+  DAD: ""
+requiredInputFields: [firstName, lastName, dateOfBirth, street, city, zipCode, eyeColor, hairColor, height, weightPounds]
+baseInput: [firstName, lastName, dateOfBirth]
+generationSteps:
+  - id: s0_random_daq
+    endpoint: random
+    input: [DAJ, QQQ, DCS, DAC, DAD, DBB, DBC, DAU, DAY, DAG, DAI, DAK, DCU, DAW, DAZ, DDA, DDB, DDK, DDL]
+    output: [DAQ]
+  - id: s1_random_dbddba
+    endpoint: random
+    input: [DAJ, DBB, DDB, DDA, QQQ, DAQ, DCS, DAC, DAD, DBC, DAU, DAY, DAG, DAI, DAK, DCU, DAW, DAZ, DDK, DDL]
+    output: [DBD, DBA]
+  - id: s2_calculate_dck
+    endpoint: calculate
+    input: [DAJ, DBD, DAQ, DBA, DBB, QQQ, DCS, DAC, DAD, DBC, DAU, DAY, DAG, DAI, DAK, DCU, DAW, DAZ, DDA, DDB, DDK, DDL]
+    output: [DCK]
+  - id: s3_calculate_dcf
+    endpoint: calculate
+    input: [DAJ, DBD, DBA, QQQ, DAQ, DCS, DAC, DAD, DBB, DBC, DAU, DAY, DAG, DAI, DAK, DCU, DAW, DAZ, DCK, DDA, DDB, DDK, DDL]
+    output: [DCF]
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: middleName, type: string, required: false, label: "Middle Name", order: 2}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 3}
+    - {name: suffix, type: enum, required: false, label: "Suffix", order: 4, options: ["", "JR", "SR", "1ST", "2ND", "3RD", "4TH", "5TH", "6TH", "7TH", "8TH", "9TH"]}
+    - {name: street, type: string, required: true, label: "Street", order: 5}
+    - {name: city, type: string, required: true, label: "City", order: 6}
+    - {name: zipCode, type: string, required: true, label: "ZIP/Postal", order: 7}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 8, validation: {maxDate: "today-16y"}}
+    - {name: sex, type: enum, required: false, label: "Sex", order: 9, options: ["1", "2"]}
+    - {name: realId, type: enum, required: false, label: "Real ID", order: 10, options: ["", "N", "F"]}
+    - {name: height, type: number, required: false, label: "Height (in)", order: 11}
+    - {name: weightPounds, type: number, required: false, label: "Weight (lbs)", order: 12}
+    - {name: eyeColor, type: enum, required: false, label: "Eye Color", order: 13, options: ["BLK", "BLU", "BRO", "DIC", "GRY", "GRN", "HAZ", "MAR", "PNK", "UNK"]}
+    - {name: hairColor, type: enum, required: false, label: "Hair Color", order: 14, options: ["BAL", "RED", "BLK", "SDY", "BLN", "WHI", "BRO", "GRY", "UNK"]}
+    - {name: organDonor, type: enum, required: false, label: "Organ Donor", order: 15, options: ["false", "true"]}
+    - {name: veteran, type: enum, required: false, label: "Veteran", order: 16, options: ["false", "true"]}

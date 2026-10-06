@@ -287,11 +287,11 @@ func TestMockClient_GenerateCalculateAndRandom(t *testing.T) {
 		t.Fatalf("unexpected random date: %#v", randomDate)
 	}
 
-	randomDefault, err := client.Random(context.Background(), "US_CA_08292017", "DBD", map[string]any{})
+	randomDefault, err := client.Random(context.Background(), "US_CA_08292017", "ZZZ", map[string]any{})
 	if err != nil {
 		t.Fatalf("Random returned error: %v", err)
 	}
-	if randomDefault != "RANDOM_DBD" {
+	if randomDefault != "RANDOM_ZZZ" {
 		t.Fatalf("unexpected default random value: %#v", randomDefault)
 	}
 }

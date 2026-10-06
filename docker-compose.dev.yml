@@ -1,7 +1,17 @@
 services:
   bff:
     environment:
-      BARCODEGEN_URL: ""
+      # Реальный BarcodeGen через internal namespace (ПЛАН §3.6/§3.3).
+      # Billing/History/AI остаются mock (пустые URL) для dev.
+      BARCODEGEN_URL: "http://barcodegen:8080"
+      BARCODEGEN_MODE: "internal"
+      BARCODEGEN_SERVICE_TOKEN: "dev-barcodegen-service-token"
+      # UNIT_PRICE в mock-billing трактуется как ratio доступного баланса:
+      # >=1 → полный доступ (иначе dev-генерация падает с INSUFFICIENT_FUNDS).
+      UNIT_PRICE: "1"
+      # В dev BFF не перекладывает PNG: render отдаёт публичный URL s3mock
+      # (localhost:19090), который недоступен из контейнера BFF. Браузер берёт его напрямую.
+      ARTIFACT_DIR: ""
       BILLING_URL: ""
       AI_URL: ""
       HISTORY_URL: ""

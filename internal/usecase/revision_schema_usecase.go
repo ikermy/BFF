@@ -8,6 +8,10 @@ import (
 )
 
 // RevisionSchemaUseCase — возвращает схему формы для ревизии (п.14.5 ТЗ).
+//
+// ПЛАН §3.1: schema полностью берётся из единого profile object (GetSchema
+// обогащает её revisionEffectiveDate/supportedModes/baseInput/generatedFields),
+// поэтому отдельный config-store/слияние не нужны.
 type RevisionSchemaUseCase struct {
 	store ports.RevisionSchemaStore
 }

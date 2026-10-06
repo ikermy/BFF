@@ -38,6 +38,22 @@ type BarcodeGenClient interface {
 	GenerateRaw(ctx context.Context, req domain.GenerateRawRequest) (domain.GenerateRawResponse, error)
 }
 
+// RenderReconciler — порт reconciliation внутреннего render registry (ПЛАН §B.5):
+// позволяет после ambiguous timeout узнать терминальный статус renderKey, не
+// запуская энкодер повторно. Реализуется internal-адаптером BarcodeGen.
+type RenderReconciler interface {
+	RenderStatus(ctx context.Context, renderKey string) (domain.RenderStatusResult, error)
+}
+
+// BarcodeFieldDeriver — grouped derive-порт (ПЛАН §3.3/§3.6): один HTTP-вызов
+// возвращает значения всех output полей шага. endpoint: "random" | "calculate".
+// Реализуется тем же HTTP-адаптером BarcodeGen, что и BarcodeGenClient.
+type BarcodeFieldDeriver interface {
+	// revision нужен адаптеру, чтобы добавить DAJ/DDB identity (BFF-имя ревизии
+	// US_<STATE>_<DATE> не входит в fields, но требуется internal derive).
+	Derive(ctx context.Context, revision, endpoint string, input map[string]any, output []string) (map[string]any, error)
+}
+
 // EventPublisher — порт публикации Kafka-событий (п.10.3, п.14.4, п.8.3 Bulk_Service_TZ).
 type EventPublisher interface {
 	PublishSagaCompleted(ctx context.Context, sagaID string) error
@@ -159,7 +175,7 @@ type RevisionSchemaStore interface {
 }
 
 // RevisionConfigStore — порт admin-управления конфигурацией ревизий (п.13.1 ТЗ).
-// Отличается от RevisionSchemaStore: здесь enabled + calculationChain, не форма.
+// Отличается от RevisionSchemaStore: здесь enabled + grouped generation steps, не форма.
 type RevisionConfigStore interface {
 	ListConfigs(ctx context.Context) ([]domain.RevisionConfig, error)
 	GetConfig(ctx context.Context, name string) (domain.RevisionConfig, error)
@@ -179,6 +195,13 @@ type TimeoutStore interface {
 
 // IdempotencyStore — порт хранилища идемпотентности (п.14.1 ТЗ).
 // В production заменяется на Redis-реализацию (REDIS_URL).
+//
+// Generate-запись идемпотентности (ПЛАН §3.3) состоит из четырёх частей под одним
+// X-Idempotency-Key: request hash (key+":hash", middleware), terminal response
+// (Set), stable generationId (вычисляется детерминированно) и accepted derive
+// checkpoints (SetCheckpoint). Checkpoints переживают сбой/потерю terminal-ответа
+// и позволяют повторной попытке переиспользовать уже принятый derive, а не
+// запускать random/calculate заново.
 type IdempotencyStore interface {
 	// Get возвращает (body, true, nil) если ключ уже завершён с готовым ответом.
 	// Возвращает (nil, false, nil) если ключ не найден или ещё in-flight.
@@ -192,6 +215,12 @@ type IdempotencyStore interface {
 	// Delete удаляет in-flight маркер при ошибке хендлера, чтобы клиент мог
 	// повторить запрос с тем же ключом. Без этого маркер блокирует ретраи до TTL.
 	Delete(ctx context.Context, key string) error
+	// SetCheckpoint сохраняет принятый промежуточный checkpoint (например,
+	// accepted derive engine-fields) под ключом. Живёт полный TTL и НЕ удаляется
+	// вместе с in-flight маркером, чтобы пережить сбой до terminal-ответа.
+	SetCheckpoint(ctx context.Context, key, name string, data []byte) error
+	// GetCheckpoint читает checkpoint: (nil, false, nil) если его нет.
+	GetCheckpoint(ctx context.Context, key, name string) ([]byte, bool, error)
 }
 
 // EditLocker — порт атомарной блокировки бесплатного редактирования (п.10.1 ТЗ).

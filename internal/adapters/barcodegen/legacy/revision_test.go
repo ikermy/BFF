@@ -12,6 +12,36 @@ func TestParseRevision(t *testing.T) {
 	}
 }
 
+func TestParseRevision_DocumentTypeSuffix(t *testing.T) {
+	pair, err := parseRevision("US_CA_08292017_ID")
+	if err != nil {
+		t.Fatalf("parseRevision(_ID suffix): %v", err)
+	}
+	if pair.State != "CA" || pair.Date != "08292017" {
+		t.Errorf("parseRevision = %+v, want {CA 08292017}", pair)
+	}
+}
+
+func TestParseRevision_MichiganLiteral(t *testing.T) {
+	pair, err := parseRevision("US_MI_Rev_01-21-2011")
+	if err != nil {
+		t.Fatalf("parseRevision(MI literal): %v", err)
+	}
+	if pair.State != "MI" || pair.Date != "Rev 01-21-2011" {
+		t.Errorf("parseRevision = %+v, want {MI \"Rev 01-21-2011\"}", pair)
+	}
+
+	SyncSupportedRevisionsFromConfigs([]string{"US_MI_Rev_01-21-2011"})
+	defer SetSupportedRevisions(nil)
+	fields, err := resolveRevision("US_MI_Rev_01-21-2011")
+	if err != nil {
+		t.Fatalf("resolveRevision(MI literal): %v", err)
+	}
+	if fields["DAJ"] != "MI" || fields["DDB"] != "Rev 01-21-2011" {
+		t.Errorf("resolveRevision fields = %v", fields)
+	}
+}
+
 func TestParseRevision_Invalid(t *testing.T) {
 	for _, rev := range []string{"", "CA_08292017", "US_CA", "US_CAX_08292017", "US_CA_0829"} {
 		if _, err := parseRevision(rev); err == nil {

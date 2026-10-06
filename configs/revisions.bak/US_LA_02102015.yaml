@@ -1,0 +1,59 @@
+name: US_LA_02102015
+displayName: "Louisiana (Feb 2015)"
+enabled: true
+revisionEffectiveDate: "2015-02-10"
+supportedModes: [prepare, prepared]
+renderAllowlist: [QQQ, DAC, DAD, DAG, DAI, DAJ, DAK, DAQ, DAU, DAW, DAY, DBA, DBB, DBC, DBD, DCA, DCB, DCD, DCF, DCJ, DCK, DCS, DCU, DDA, DDB, DDK, DDL, ZLA, ZLB, ZLC, ZLE, ZLF, ZLI]
+defaults:
+  QQQ: "DL"
+  DAD: "NONE"
+  DCA: "C"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DAY: "BRO"
+  DAU: "510"
+  DAW: "150"
+  DAG: "1 MAIN ST"
+  DAI: "CITY"
+  DAK: "00000"
+  DDA: "F"
+  DDK: "NONE"
+  DDL: "NONE"
+  DCU: "NONE"
+  ZLA: "NONE"
+  ZLB: "NONE"
+  ZLC: "NONE"
+  ZLE: "NONE"
+  ZLF: "NONE"
+  ZLI: "NONE"
+requiredInputFields: [firstName, lastName, dateOfBirth, auditCode]
+# baseInput — только базовые поля для engine-map; auditCode (DCJ) сюда не входит.
+baseInput: [firstName, lastName, dateOfBirth]
+# LA: auditCode — обязательный пользовательский ввод, маппится в DCJ; DCJ не генерируется.
+generationSteps:
+  - id: daq
+    endpoint: random
+    input: [DAJ]
+    output: [DAQ]
+  - id: dates
+    endpoint: random
+    input: [DAJ, DBB]
+    output: [DBD, DBA]
+  - id: dck
+    endpoint: calculate
+    input: [DAJ, DBD, DAQ, DBA, DBB]
+    output: [DCK]
+  - id: dcf
+    endpoint: calculate
+    input: [DAJ, DBD, DBA]
+    output: [DCF]
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 2}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 3, validation: {maxDate: "today-16y"}}
+    - {name: street, type: string, required: false, label: "Street", order: 4}
+    - {name: city, type: string, required: false, label: "City", order: 5}
+    - {name: zipCode, type: string, required: false, label: "ZIP", order: 7}
+    - {name: auditCode, type: string, required: true, label: "Audit Information", order: 30, validation: {maxLength: 64}}

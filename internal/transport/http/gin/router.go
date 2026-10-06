@@ -87,6 +87,9 @@ func NewRouter(
 			h.API.Generate,
 		)
 
+		// POST /barcode/prepare — stateless черновик, без X-Idempotency-Key и без billing (ПЛАН §3.3).
+		api.POST("/barcode/prepare", h.API.Prepare)
+
 		// Dedicated форматные эндпоинты (п.12.3, 12.4 ТЗ) — без billing, прямой вызов BarcodeGen.
 		// Также требуют X-Idempotency-Key (п.14.1 ТЗ: все write-операции).
 		// Ключ дополнительно форвардируется в BarcodeGen как X-Idempotency-Key (п.8.2 ТЗ).

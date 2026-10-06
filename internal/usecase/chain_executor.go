@@ -2,11 +2,10 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"strings"
-	"time"
 
 	"github.com/ikermy/BFF/internal/domain"
-	"github.com/ikermy/BFF/internal/metrics"
 	"github.com/ikermy/BFF/internal/ports"
 )
 
@@ -15,90 +14,198 @@ import (
 // КЛЮЧЕВОЕ ПРАВИЛО (п.4.2 ТЗ): Пользовательский ввод НИКОГДА не перезаписывается!
 // Если пользователь заполнил поле — шаг пропускается, поле попадает в Skipped.
 type ChainExecutor struct {
-	barcodeGen ports.BarcodeGenClient
-	revisions  ports.RevisionConfigStore
+	barcodeGen   ports.BarcodeGenClient
+	revisions    ports.RevisionConfigStore
+	deriver      ports.BarcodeFieldDeriver // grouped derive (ПЛАН §3.3); nil → per-field fallback
+	clock        Clock
+	dateAttempts int
 }
 
 func NewChainExecutor(barcodeGen ports.BarcodeGenClient, revisions ports.RevisionConfigStore) *ChainExecutor {
-	return &ChainExecutor{barcodeGen: barcodeGen, revisions: revisions}
+	return &ChainExecutor{barcodeGen: barcodeGen, revisions: revisions, dateAttempts: 20}
 }
 
-// Execute выполняет цепочку вычислений для заданной ревизии.
-//
-// Алгоритм (п.4.2 ТЗ):
-//  1. Копируем userInput в resolvedFields.
-//  2. Для каждого шага цепочки:
-//     a. Если поле уже заполнено пользователем → Skipped (не трогаем!).
-//     b. Проверяем dependsOn — все зависимости должны быть в resolvedFields.
-//     c. Вызываем BarcodeGen.Calculate или .Random в зависимости от source.
-//     d. Сохраняем результат в resolvedFields.
-func (e *ChainExecutor) Execute(ctx context.Context, revision string, userInput map[string]any) (domain.ChainResult, error) {
-	start := time.Now()
-	defer func() {
-		metrics.ChainExecutionDurationMs.Observe(float64(time.Since(start).Milliseconds()))
-	}()
+// WithDeriver подключает grouped derive-порт (для GenerationSteps).
+func (e *ChainExecutor) WithDeriver(d ports.BarcodeFieldDeriver) *ChainExecutor {
+	e.deriver = d
+	return e
+}
 
+// WithClock подключает часы для date-валидатора.
+func (e *ChainExecutor) WithClock(c Clock) *ChainExecutor {
+	e.clock = c
+	return e
+}
+
+// WithDateAttempts задаёт лимит повторов date-step.
+func (e *ChainExecutor) WithDateAttempts(n int) *ChainExecutor {
+	if n > 0 {
+		e.dateAttempts = n
+	}
+	return e
+}
+
+// ExecuteGrouped выполняет grouped GenerationSteps профиля (ПЛАН §3.3) — это
+// единственная runtime-модель генерации. Legacy CalculationChain больше не
+// исполняется. Профиль без GenerationSteps (например LA, где поля задаёт
+// пользователь) просто возвращает вход без вычислений.
+//
+// Правила: пользовательские значения не перезаписываются; date-step (output
+// содержит DBD и DBA) проходит bounded-повтор через ValidateGeneratedDates;
+// отсутствие deriver'а → per-field fallback через BarcodeGenClient.
+func (e *ChainExecutor) ExecuteGrouped(ctx context.Context, revision string, baseInput map[string]any) (domain.ChainResult, error) {
 	cfg, err := e.revisions.GetConfig(ctx, revision)
 	if err != nil {
 		return domain.ChainResult{}, domain.NewValidationError("revision not found: " + revision)
 	}
 
-	// Начинаем с копии пользовательского ввода
-	resolvedFields := make(map[string]any, len(userInput))
-	for k, v := range userInput {
-		resolvedFields[k] = v
+	resolved := make(map[string]any, len(baseInput))
+	for k, v := range baseInput {
+		resolved[k] = v
+	}
+	// public→engine алиасы (dateOfBirth→DBB, state→DAJ, …) до выполнения шагов:
+	// step.Input оперирует engine-кодами, а форма присылает public-имена.
+	resolved = domain.NormalizeEngineFields(resolved)
+	// static-константы профиля доступны и derive-шагам (напр. DDA для CO/AZ).
+	domain.ApplyEngineDefaults(resolved, cfg.Defaults)
+
+	if len(cfg.GenerationSteps) == 0 {
+		return domain.ChainResult{Fields: resolved}, nil
 	}
 
-	computed := make([]string, 0, len(cfg.CalculationChain))
-	var skipped []string
+	computed := make([]string, 0)
+	skipped := make([]string, 0)
 
-	for _, step := range cfg.CalculationChain {
-		// КЛЮЧЕВАЯ ПРОВЕРКА: если пользователь заполнил — пропускаем! (п.4.2 ТЗ)
-		if hasUserValue(userInput, step.Field) {
-			skipped = append(skipped, step.Field)
-			continue
+	for _, step := range cfg.GenerationSteps {
+		input := pickFields(resolved, step.Input)
+
+		outputs, err := e.runStep(ctx, revision, cfg, step, input)
+		if err != nil {
+			return domain.ChainResult{}, err
 		}
 
-		// Проверяем что все зависимости уже присутствуют в resolvedFields (п.5.2 ТЗ)
-		if len(step.DependsOn) > 0 {
-			var missing []string
-			for _, dep := range step.DependsOn {
-				if !hasUserValue(resolvedFields, dep) {
-					missing = append(missing, dep)
-				}
+		for _, field := range step.Output {
+			if hasUserValue(baseInput, field) {
+				skipped = append(skipped, field)
+				continue
 			}
-			if len(missing) > 0 {
-				return domain.ChainResult{}, domain.NewMissingDependencyError(step.Field, missing)
+			value, ok := outputs[field]
+			if !ok || value == nil {
+				return domain.ChainResult{}, domain.NewValidationError("step " + step.ID + " produced no value for " + field)
+			}
+			resolved[field] = value
+			computed = append(computed, field)
+		}
+	}
+
+	return domain.ChainResult{Fields: resolved, Computed: computed, Skipped: skipped}, nil
+}
+
+// runStep выполняет один grouped-шаг; для date-step применяет валидатор дат.
+func (e *ChainExecutor) runStep(ctx context.Context, revision string, cfg domain.RevisionConfig, step domain.GenerationStep, input map[string]any) (map[string]any, error) {
+	if isDateStep(step.Output) {
+		clk := e.clock
+		if clk == nil {
+			clk = RealClock{}
+		}
+		dbd, dba, err := FetchValidatedDateStep(e.dateAttempts, func() (string, string, error) {
+			out, derr := e.derive(ctx, revision, step.Endpoint, input, step.Output)
+			if derr != nil {
+				return "", "", derr
+			}
+			return fmt.Sprint(out["DBD"]), fmt.Sprint(out["DBA"]), nil
+		}, cfg.RevisionEffectiveDate, clk)
+		if err != nil {
+			var de *DateValidationError
+			if asDateError(err, &de) {
+				return nil, domain.NewBarcodeGenInvalidDateError(err)
+			}
+			return nil, domain.NewBarcodeGenError(err)
+		}
+		out := make(map[string]any, len(step.Output))
+		for _, f := range step.Output {
+			switch f {
+			case "DBD":
+				out[f] = dbd
+			case "DBA":
+				out[f] = dba
 			}
 		}
+		return out, nil
+	}
 
-		var value any
-		switch step.Source {
-		case "calculate":
-			value, err = e.barcodeGen.Calculate(ctx, revision, step.Field, resolvedFields)
-			if err != nil {
-				return domain.ChainResult{}, domain.NewBarcodeGenError(err)
-			}
+	out, err := e.derive(ctx, revision, step.Endpoint, input, step.Output)
+	if err != nil {
+		return nil, domain.NewBarcodeGenError(err)
+	}
+	return out, nil
+}
+
+// derive вызывает grouped deriver, либо per-field fallback через BarcodeGenClient.
+func (e *ChainExecutor) derive(ctx context.Context, revision, endpoint string, input map[string]any, output []string) (map[string]any, error) {
+	if e.deriver != nil {
+		return e.deriver.Derive(ctx, revision, endpoint, input, output)
+	}
+	out := make(map[string]any, len(output))
+	for _, field := range output {
+		var (
+			value any
+			err   error
+		)
+		switch endpoint {
 		case "random":
-			value, err = e.barcodeGen.Random(ctx, revision, step.Field, step.Params)
-			if err != nil {
-				return domain.ChainResult{}, domain.NewBarcodeGenError(err)
-			}
+			value, err = e.barcodeGen.Random(ctx, revision, field, input)
+		case "calculate":
+			value, err = e.barcodeGen.Calculate(ctx, revision, field, input)
 		default:
-			// source=user: поле должно быть заполнено пользователем, пропускаем
-			skipped = append(skipped, step.Field)
-			continue
+			return nil, fmt.Errorf("unsupported derive endpoint: %s", endpoint)
 		}
-
-		resolvedFields[step.Field] = value
-		computed = append(computed, step.Field)
+		if err != nil {
+			return nil, err
+		}
+		out[field] = value
 	}
+	return out, nil
+}
 
-	return domain.ChainResult{
-		Fields:   resolvedFields,
-		Computed: computed,
-		Skipped:  skipped,
-	}, nil
+// asDateError — errors.As для *DateValidationError без импорта errors в вызывающем.
+func asDateError(err error, target **DateValidationError) bool {
+	for err != nil {
+		if de, ok := err.(*DateValidationError); ok {
+			*target = de
+			return true
+		}
+		unwrapper, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = unwrapper.Unwrap()
+	}
+	return false
+}
+
+func isDateStep(outputs []string) bool {
+	var hasDBD, hasDBA bool
+	for _, o := range outputs {
+		if o == "DBD" {
+			hasDBD = true
+		}
+		if o == "DBA" {
+			hasDBA = true
+		}
+	}
+	return hasDBD && hasDBA
+}
+
+// pickFields выбирает указанные поля из resolved, если они заданы.
+func pickFields(resolved map[string]any, fields []string) map[string]any {
+	out := make(map[string]any, len(fields))
+	for _, f := range fields {
+		if v, ok := resolved[f]; ok {
+			out[f] = v
+		}
+	}
+	return out
 }
 
 // hasUserValue проверяет, заполнил ли пользователь поле (п.4.2 ТЗ).

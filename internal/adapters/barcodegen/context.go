@@ -1,23 +1,18 @@
 package barcodegen
 
-import "context"
+import (
+	"context"
 
-// contextKey — private тип ключа контекста, чтобы избежать коллизий.
-type contextKey int
+	"github.com/ikermy/BFF/internal/domain"
+)
 
-// ctxKeyUserID — ключ, под которым userID попадает в request-контекст.
-// Устанавливается в UserJWTMiddleware и читается legacy-адаптером для минта
-// сервисного JWT (порт не расширяем — userID берём из context, см. отчёт §4.2 п.1).
-const ctxKeyUserID contextKey = iota
-
-// WithUserID возвращает копию ctx с сохранённым userID.
+// WithUserID кладёт userID в контекст (ownerId для internal render).
+// Делегирует в domain, чтобы usecase мог ставить ownerId без импорта адаптера.
 func WithUserID(ctx context.Context, userID string) context.Context {
-	return context.WithValue(ctx, ctxKeyUserID, userID)
+	return domain.WithUserID(ctx, userID)
 }
 
-// UserIDFromContext извлекает userID из контекста. Возвращает (userID, true),
-// если значение задано и не пустое.
+// UserIDFromContext извлекает userID из контекста.
 func UserIDFromContext(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(ctxKeyUserID).(string)
-	return id, ok && id != ""
+	return domain.UserIDFromContext(ctx)
 }

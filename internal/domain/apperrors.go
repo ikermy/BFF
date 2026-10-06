@@ -11,7 +11,25 @@ const (
 	ErrCodeDuplicateRequest  = "DUPLICATE_REQUEST"  // 200 — не ошибка, возвращаем кэш
 	ErrCodeBarcodeGenError   = "BARCODEGEN_ERROR"   // 503
 	ErrCodeBillingError      = "BILLING_ERROR"      // 503
+	// Даты (МИКРО_ТЗ_ВАЛИДАТОР_СГЕНЕРИРОВАННЫХ_ДАТ.md)
+	ErrCodeInvalidGeneratedDate    = "INVALID_GENERATED_DATE"        // 422
+	ErrCodeIssueDateBeforeRevision = "ISSUE_DATE_BEFORE_REVISION"    // 422
+	ErrCodeBarcodeGenInvalidDate   = "BARCODEGEN_INVALID_ISSUE_DATE" // 502
 )
+
+// NewBarcodeGenInvalidDateError — 502 после исчерпания повторов date-step (prepare/auto).
+func NewBarcodeGenInvalidDateError(cause error) *AppError {
+	return &AppError{Code: ErrCodeBarcodeGenInvalidDate, HTTPStatus: 502, Message: cause.Error()}
+}
+
+// NewInvalidGeneratedDateError — 422 для prepared (без перегенерации).
+func NewInvalidGeneratedDateError(kind string, msg string) *AppError {
+	code := ErrCodeInvalidGeneratedDate
+	if kind == "before_revision" {
+		code = ErrCodeIssueDateBeforeRevision
+	}
+	return &AppError{Code: code, HTTPStatus: 422, Message: msg}
+}
 
 // AppError — структурированная ошибка BFF (п.15.1 ТЗ).
 // Реализует интерфейс error. Хендлер извлекает HTTPStatus через errors.As.

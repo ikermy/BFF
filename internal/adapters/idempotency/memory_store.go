@@ -11,6 +11,12 @@ type entry struct {
 	expiresAt time.Time
 }
 
+// checkpointPrefix — суффикс ключа accepted derive checkpoint (ПЛАН §3.3).
+// Полный ключ: <X-Idempotency-Key>:cp:<name>.
+const checkpointPrefix = ":cp:"
+
+func checkpointKey(key, name string) string { return key + checkpointPrefix + name }
+
 // MemoryStore — in-memory IdempotencyStore с TTL (п.14.1 ТЗ).
 // В production заменяется на Redis:
 //
@@ -95,11 +101,32 @@ func (s *MemoryStore) Set(_ context.Context, key string, body []byte) error {
 // Delete удаляет in-flight маркер, освобождая ключ для повторного запроса.
 // Вызывается middleware при ошибке хендлера (не-2xx): без этого маркер
 // блокирует все ретраи с тем же X-Idempotency-Key до истечения TTL.
+// Checkpoints (key+":cp:"+name) намеренно НЕ удаляются: они должны пережить
+// сбой, чтобы повторная попытка переиспользовала accepted derive (ПЛАН §3.3).
 func (s *MemoryStore) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.entries, key)
 	return nil
+}
+
+// SetCheckpoint сохраняет accepted derive checkpoint (ПЛАН §3.3).
+func (s *MemoryStore) SetCheckpoint(_ context.Context, key, name string, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries[checkpointKey(key, name)] = entry{body: data, expiresAt: time.Now().Add(s.ttl)}
+	return nil
+}
+
+// GetCheckpoint читает accepted derive checkpoint: (nil, false, nil) если нет.
+func (s *MemoryStore) GetCheckpoint(_ context.Context, key, name string) ([]byte, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e, ok := s.entries[checkpointKey(key, name)]
+	if !ok || time.Now().After(e.expiresAt) || e.body == nil {
+		return nil, false, nil
+	}
+	return e.body, true, nil
 }
 
 // cleanup удаляет просроченные записи каждые 5 минут.

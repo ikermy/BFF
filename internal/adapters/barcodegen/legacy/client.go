@@ -293,6 +293,26 @@ func extractField(resp map[string]any, code string) any {
 	return nil
 }
 
+// Derive — grouped derive через public-контракт BarcodeGen: {input, output} → поля.
+// Ответ приходит с human-label/AAMVA ключами, поэтому каждый output берём через extractField.
+func (c *LegacyClient) Derive(ctx context.Context, revision, endpoint string, input map[string]any, output []string) (map[string]any, error) {
+	if endpoint != "random" && endpoint != "calculate" {
+		return nil, fmt.Errorf("barcodegen: unsupported derive endpoint: %s", endpoint)
+	}
+	mapped := mapFields(input)
+	withRevisionIdentity(mapped, revision)
+	body := fieldSetReq{Input: mapped, Output: output}
+	var resp map[string]any
+	if err := c.post(ctx, "/api/v1/barcodes/"+endpoint, body, &resp); err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(output))
+	for _, code := range output {
+		out[code] = extractField(resp, code)
+	}
+	return out, nil
+}
+
 // ─── GenerateRaw (raw-функция отсутствует в ядре) ────────────────────────────
 
 func (c *LegacyClient) GenerateRaw(ctx context.Context, req domain.GenerateRawRequest) (domain.GenerateRawResponse, error) {

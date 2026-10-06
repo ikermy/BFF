@@ -2,9 +2,14 @@ package legacy
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 )
+
+// michiganRevRE — literal-форма DDB Michigan ("Rev 01-21-2011"), где DDB не
+// приводится к 8 цифрам и должен сравниваться точно (MI-фикстура).
+var michiganRevRE = regexp.MustCompile(`^Rev \d{2}-\d{2}-\d{4}$`)
 
 // Мост ревизий: BFF-имя ревизии (US_CA_08292017) ↔ пара полей {DAJ, DDB},
 // которую принимает BarcodeGen. BarcodeGen ищет конфиг по findByStateAndRev(values.DAJ,
@@ -59,13 +64,19 @@ func SyncSupportedRevisionsFromConfigs(names []string) {
 // Возвращает ошибку при неверном формате.
 func parseRevision(revision string) (revisionPair, error) {
 	parts := strings.Split(revision, "_")
-	if len(parts) != 3 || !strings.EqualFold(parts[0], "US") {
-		return revisionPair{}, fmt.Errorf("unsupported revision format: %q (want US_<STATE>_<MMDDYYYY>)", revision)
+	// US_<STATE>_<MMDDYYYY> (US) и CA_<PROV>_<MMDDYYYY> (Канада: ON/AB).
+	if len(parts) < 3 || len(parts[1]) != 2 || (!strings.EqualFold(parts[0], "US") && !strings.EqualFold(parts[0], "CA")) {
+		return revisionPair{}, fmt.Errorf("unsupported revision format: %q (want <US|CA>_<REGION>_<MMDDYYYY>)", revision)
 	}
 	state := strings.ToUpper(parts[1])
+	// Michigan-style literal DDB: US_MI_Rev_01-21-2011 → DDB "Rev 01-21-2011".
+	if literal := strings.Join(parts[2:], " "); michiganRevRE.MatchString(literal) {
+		return revisionPair{State: state, Date: literal}, nil
+	}
 	date := parts[2]
-	if len(state) != 2 || len(date) != 8 {
-		return revisionPair{}, fmt.Errorf("unsupported revision format: %q (want US_<STATE>_<MMDDYYYY>)", revision)
+	// Допускаем хвостовые суффиксы (напр. US_CA_08292017_ID → DAJ=CA, DDB=08292017).
+	if len(date) != 8 {
+		return revisionPair{}, fmt.Errorf("unsupported revision format: %q (want <US|CA>_<REGION>_<MMDDYYYY>)", revision)
 	}
 	return revisionPair{State: state, Date: date}, nil
 }

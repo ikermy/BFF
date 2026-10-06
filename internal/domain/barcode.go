@@ -12,6 +12,8 @@ type GenerateRequest struct {
 	BatchID        string         `json:"batchId"`
 	Fields         map[string]any `json:"fields"`
 	IdempotencyKey string         `json:"-"`
+	// Mode — "auto" (default) | "prepared": prepared не запускает derive-цепочку.
+	Mode string `json:"mode,omitempty"`
 
 	// AI Service флаги (п.9.3 ТЗ)
 	GenerateSignature bool   `json:"generateSignature,omitempty"`
@@ -23,8 +25,9 @@ type GenerateRequest struct {
 }
 
 type BarcodeItem struct {
-	URL    string `json:"url"`
-	Format string `json:"format"`
+	URL          string `json:"url"`
+	Format       string `json:"format"`
+	GenerationID string `json:"generationId,omitempty"`
 }
 
 // GenerateResponse — ответ POST /api/v1/barcode/generate (п.12.2 ТЗ).
@@ -53,6 +56,24 @@ type EditResponse struct {
 	NewURL  string `json:"newUrl,omitempty"`
 	CanEdit bool   `json:"canEdit"`
 	Reason  string `json:"reason,omitempty"`
+}
+
+// ─── Prepare (ПЛАН §3.3) ─────────────────────────────────────────────────────
+
+// PrepareRequest — тело запроса POST /api/v1/barcode/prepare.
+type PrepareRequest struct {
+	Revision    string         `json:"revision" binding:"required"`
+	BarcodeType string         `json:"barcodeType,omitempty"`
+	Fields      map[string]any `json:"fields"`
+}
+
+// PrepareResponse — редактируемый черновик без Billing/render/History.
+type PrepareResponse struct {
+	Success     bool           `json:"success"`
+	Revision    string         `json:"revision"`
+	DraftFields map[string]any `json:"draftFields"`
+	Computed    []string       `json:"computed"`
+	Skipped     []string       `json:"skipped"`
 }
 
 // ChainResult — результат выполнения цепочки расчётов ChainExecutor (п.4 ТЗ).
@@ -113,6 +134,14 @@ type GeneratePDF417Response struct {
 	BarcodeURL string          `json:"barcodeUrl"`
 	Format     string          `json:"format"`
 	Metadata   BarcodeMetadata `json:"metadata"`
+}
+
+// RenderStatusResult — результат reconciliation internal render registry (ПЛАН §B.1/B.5).
+type RenderStatusResult struct {
+	Status        string // "SUCCEEDED" | "PROCESSING" | "FAILED"
+	BarcodeURL    string
+	Format        string
+	ErrorCategory string
 }
 
 // ─── п.12.4 POST /api/v1/barcode/generate/code128 ────────────────────────────

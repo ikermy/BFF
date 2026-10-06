@@ -5,12 +5,43 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ikermy/BFF/internal/adapters/idempotency"
 )
+
+func TestIdempotencyMiddleware_RejectsReusedKeyWithDifferentBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := idempotency.NewMemoryStore(10 * time.Second)
+	r := gin.New()
+	r.POST("/test", IdempotencyMiddleware(store), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+
+	do := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(body))
+		req.Header.Set("X-Idempotency-Key", "reuse-1")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := do(`{"a":1}`); w.Code != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", w.Code)
+	}
+	// Другое тело с тем же ключом → 409.
+	if w := do(`{"a":2}`); w.Code != http.StatusConflict {
+		t.Fatalf("reused key with different body: expected 409, got %d body=%s", w.Code, w.Body.String())
+	}
+	// То же тело → replay 200 с DUPLICATE_REQUEST.
+	w := do(`{"a":1}`)
+	if w.Code != http.StatusOK || w.Header().Get("X-Idempotency-Replayed") != "true" {
+		t.Fatalf("same body replay: expected 200 replayed, got %d", w.Code)
+	}
+}
 
 type sequenceIdempotencyStore struct {
 	getCalls int
@@ -35,6 +66,14 @@ func (s *sequenceIdempotencyStore) Set(_ context.Context, _ string, _ []byte) er
 
 func (s *sequenceIdempotencyStore) Delete(_ context.Context, _ string) error {
 	return nil
+}
+
+func (s *sequenceIdempotencyStore) SetCheckpoint(_ context.Context, _, _ string, _ []byte) error {
+	return nil
+}
+
+func (s *sequenceIdempotencyStore) GetCheckpoint(_ context.Context, _, _ string) ([]byte, bool, error) {
+	return nil, false, nil
 }
 
 func TestIdempotencyMiddleware_ReturnsDuplicateRequestWhenCacheAppearsAfterReserveRace(t *testing.T) {

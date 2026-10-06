@@ -24,6 +24,13 @@ type APIHandler struct {
 	barcode        ports.BarcodeGenClient
 	history        ports.HistoryClient
 	authUser       ports.AuthUserCommandsClient
+	prepare        *usecase.PrepareUseCase
+}
+
+// WithPrepare подключает PrepareUseCase (POST /api/v1/barcode/prepare).
+func (h *APIHandler) WithPrepare(p *usecase.PrepareUseCase) *APIHandler {
+	h.prepare = p
+	return h
 }
 
 func NewAPIHandler(
@@ -93,6 +100,26 @@ func (h *APIHandler) Generate(c *gin.Context) {
 			})
 			return
 		}
+		RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// Prepare — POST /api/v1/barcode/prepare (ПЛАН §3.3).
+// Возвращает редактируемый черновик без Billing/render/History и без X-Idempotency-Key.
+func (h *APIHandler) Prepare(c *gin.Context) {
+	var req domain.PrepareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, domain.NewValidationError(err.Error()))
+		return
+	}
+	if h.prepare == nil {
+		RespondError(c, domain.NewValidationError("prepare is not configured"))
+		return
+	}
+	result, err := h.prepare.Execute(c.Request.Context(), req)
+	if err != nil {
 		RespondError(c, err)
 		return
 	}

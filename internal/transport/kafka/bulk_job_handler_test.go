@@ -8,7 +8,7 @@ import (
 
 	"github.com/ikermy/BFF/internal/adapters/barcodegen"
 	"github.com/ikermy/BFF/internal/adapters/billing"
-	"github.com/ikermy/BFF/internal/adapters/revisions"
+	"github.com/ikermy/BFF/internal/adapters/revisions/revisionstest"
 	"github.com/ikermy/BFF/internal/domain"
 	"github.com/ikermy/BFF/internal/usecase"
 )
@@ -47,11 +47,11 @@ func (s *spyEventPublisher) snapshotBulkResults() []domain.BulkResultEvent {
 	return out
 }
 
-func newTestBulkHandler() (*BulkJobHandler, *spyEventPublisher) {
+func newTestBulkHandler(t *testing.T) (*BulkJobHandler, *spyEventPublisher) {
 	publisher := &spyEventPublisher{}
 	billingClient := billing.NewMockClient(1.0)
 	barcodeClient := barcodegen.NewMockClient()
-	revisionStore := revisions.NewMemoryStore()
+	revisionStore := revisionstest.MustLoad(t)
 	quoteCase := usecase.NewQuoteUseCase(billingClient)
 	chainExecutor := usecase.NewChainExecutor(barcodeClient, revisionStore)
 	generateCase := usecase.NewGenerateUseCase(billingClient, barcodeClient, publisher, quoteCase).
@@ -73,7 +73,7 @@ func validBulkFields() map[string]any {
 }
 
 func TestBulkJobHandler_HandleSuccess(t *testing.T) {
-	handler, publisher := newTestBulkHandler()
+	handler, publisher := newTestBulkHandler(t)
 
 	msg := domain.BulkJobMessage{
 		BatchID: "batch-42",
@@ -117,7 +117,7 @@ func TestBulkJobHandler_HandleSuccess(t *testing.T) {
 }
 
 func TestBulkJobHandler_HandleContinuesAfterItemFailure(t *testing.T) {
-	handler, publisher := newTestBulkHandler()
+	handler, publisher := newTestBulkHandler(t)
 
 	msg := domain.BulkJobMessage{
 		BatchID: "batch-77",
@@ -176,7 +176,7 @@ func TestBulkJobHandler_HandleContinuesAfterItemFailure(t *testing.T) {
 }
 
 func TestBulkJobHandler_HandleEmptyItems(t *testing.T) {
-	handler, publisher := newTestBulkHandler()
+	handler, publisher := newTestBulkHandler(t)
 
 	msg := domain.BulkJobMessage{BatchID: "empty-batch", UserID: "user-3"}
 	if err := handler.Handle(context.Background(), msg); err != nil {

@@ -1,0 +1,53 @@
+name: US_AZ_03012023
+displayName: "Arizona 2023"
+enabled: true
+revisionEffectiveDate: "2023-03-01"
+country: USA
+supportedModes: [prepare, auto, prepared]
+renderAllowlist: [DAJ, DDB, QQQ, DAQ, DBB, DDA, DBD, DBA, DCK, DCS, DAC, DCF, DCA, DCB, DCD, DAD, DBC, DAU, DAY, DAG, DAI, DAK, DAW, DDK, DDL]
+defaults:
+  QQQ: "DL"
+  DCA: "D"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DDA: "F"
+  DAD: ""
+requiredInputFields: [firstName, lastName, dateOfBirth, street, city, zipCode, eyeColor, height, weightPounds]
+baseInput: [firstName, lastName, dateOfBirth]
+generationSteps:
+  - id: s0_random_daq
+    endpoint: random
+    input: [DAJ, QQQ, DCS, DAC, DAD, DCA, DCB, DCD, DBB, DBC, DAU, DAY, DAG, DAI, DAK, DDA, DDB, DAW, DDK, DDL]
+    output: [DAQ]
+  - id: s1_random_dbddba
+    endpoint: random
+    input: [DAJ, DBB, DDB, DDA, QQQ, DAQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAY, DAG, DAI, DAK, DAW, DDK, DDL]
+    output: [DBD, DBA]
+  - id: s2_calculate_dck
+    endpoint: calculate
+    input: [DAJ, DBD, DAQ, DBA, DBB, QQQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAY, DAG, DAI, DAK, DDA, DDB, DAW, DDK, DDL]
+    output: [DCK]
+  - id: s3_calculate_dcf
+    endpoint: calculate
+    input: [DAJ, DBD, DCS, DAC, DBB, QQQ, DAQ, DAD, DCA, DCB, DCD, DBA, DBC, DAU, DAY, DAG, DAI, DAK, DCK, DDA, DDB, DAW, DDK, DDL]
+    output: [DCF]
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: middleName, type: string, required: false, label: "Middle Name", order: 2}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 3}
+    - {name: street, type: string, required: true, label: "Street", order: 4}
+    - {name: city, type: string, required: true, label: "City", order: 5}
+    - {name: zipCode, type: string, required: true, label: "ZIP/Postal", order: 6}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 7, validation: {maxDate: "today-16y"}}
+    - {name: sex, type: enum, required: false, label: "Sex", order: 8, options: ["1", "2"]}
+    - {name: realId, type: enum, required: false, label: "Real ID", order: 9, options: ["", "N", "F"]}
+    - {name: vehicleClass, type: enum, required: false, label: "Class", order: 10, options: ["A", "B", "D"]}
+    - {name: restrictions, type: enum, required: false, label: "Restrictions", order: 11, options: ["NONE", "B", "A"]}
+    - {name: endorsements, type: enum, required: false, label: "Endorsements", order: 12, options: ["NONE", "H", "D", "P"]}
+    - {name: height, type: number, required: false, label: "Height (in)", order: 13}
+    - {name: weightPounds, type: number, required: false, label: "Weight (lbs)", order: 14}
+    - {name: eyeColor, type: enum, required: false, label: "Eye Color", order: 15, options: ["BLK", "BLU", "BRO", "DIC", "GRY", "GRN", "HAZ", "MAR", "PNK", "UNK"]}
+    - {name: organDonor, type: enum, required: false, label: "Organ Donor", order: 16, options: ["false", "true"]}
+    - {name: veteran, type: enum, required: false, label: "Veteran", order: 17, options: ["false", "true"]}

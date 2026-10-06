@@ -145,6 +145,20 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 	var barcodeClient ports.BarcodeGenClient
 	if url := os.Getenv(config.EnvBarcodeGenURL); url != "" {
 		switch cfg.BarcodeGenMode {
+		case "internal":
+			// internal — BFF-адаптер к /api/internal/v1/barcodes/* (service token,
+			// без Billing/Kafka на стороне BarcodeGen). Code128/GenerateRaw — legacy fallback.
+			if cfg.BarcodeGenServiceToken == "" {
+				log.Fatalf("barcodegen: BARCODEGEN_SERVICE_TOKEN is required for mode=internal (mock fallback disabled)")
+			}
+			log.Printf("barcodegen: using internal ACL adapter → %s (mode=internal)", url)
+			internalClient := legacy.NewInternalClient(cfg.Services.BarcodeGenURL, cfg.JWTAccessSecret, cfg.BarcodeGenServiceToken, cfg.BarcodeGenRawURL, cfg.Timeouts.BarcodeGen).
+				WithIdempotencyStore(idempotencyStore)
+			if cfg.ArtifactDir != "" {
+				log.Printf("barcodegen: artifact relocation → dir=%s public=%s", cfg.ArtifactDir, cfg.ArtifactPublicBase)
+				internalClient = internalClient.WithArtifactStore(legacy.NewLocalArtifactStore(cfg.ArtifactDir, cfg.ArtifactPublicBase))
+			}
+			barcodeClient = internalClient
 		case "legacy":
 			log.Printf("barcodegen: using legacy ACL adapter → %s (mode=legacy)", url)
 			legacyClient := legacy.NewLegacyClient(cfg.Services.BarcodeGenURL, cfg.JWTAccessSecret, cfg.BarcodeGenRawURL, cfg.Timeouts.BarcodeGen).
@@ -160,6 +174,9 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 				WithTimeouts(timeoutStore) // п.13.2: динамический таймаут
 		}
 	} else {
+		if cfg.BarcodeGenMode == "internal" {
+			log.Fatalf("barcodegen: BARCODEGEN_URL is required for mode=internal (mock fallback disabled)")
+		}
 		log.Printf("barcodegen: BARCODEGEN_URL not set, using mock client")
 		barcodeClient = barcodegen.NewMockClient()
 	}
@@ -235,12 +252,19 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		WithPartialSuccessEnabled(cfg.Features.EnablePartialSuccess)
 	bulkCase := usecase.NewBulkUseCase(billingClient)
 	chainExecutor := usecase.NewChainExecutor(barcodeClient, revisionStore)
+	if deriver, ok := barcodeClient.(ports.BarcodeFieldDeriver); ok {
+		chainExecutor = chainExecutor.WithDeriver(deriver).WithDateAttempts(cfg.MaxIssueDateAttempts)
+	}
 	generateCase := usecase.NewGenerateUseCase(billingClient, barcodeClient, eventPublisher, quoteCase).
 		WithPartialSuccessEnabled(cfg.Features.EnablePartialSuccess).
 		WithChainExecutor(chainExecutor).
 		WithTransHistory(transHistoryPublisher).
 		WithAI(aiClient).
+		WithIdempotencyStore(idempotencyStore).
 		WithRevisionStore(revisionStore)
+	if rec, ok := barcodeClient.(ports.RenderReconciler); ok {
+		generateCase = generateCase.WithRenderReconciler(rec)
+	}
 	if cfg.Features.EnableNotifications {
 		generateCase = generateCase.WithNotifications(notificationsPublisher)
 	}
@@ -280,7 +304,9 @@ func BuildAPIAppWithContext(parentCtx context.Context, cfg config.Config) *APIAp
 		authUserCommands = auth.NewMockClient()
 	}
 
-	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient, authUserCommands)
+	prepareCase := usecase.NewPrepareUseCase(chainExecutor, revisionStore, revisionStore)
+	apiHandler := gintransport.NewAPIHandler(quoteCase, generateCase, editCase, bulkConsumer, revisionSchemaCase, revisionStore, barcodeClient, historyClient, authUserCommands).
+		WithPrepare(prepareCase)
 	internalHandler := gintransport.NewInternalHandler(quoteCase, bulkCase, revisionStore, revisionSchemaCase, barcodeClient)
 	adminHandler := gintransport.NewAdminHandler(topUpBonusStore, kafkaTopicsStore, timeoutStore, revisionStore)
 

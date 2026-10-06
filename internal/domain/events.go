@@ -12,13 +12,14 @@ type BulkResultEvent struct {
 
 // BarcodeGeneratedEvent — событие barcode.generated, публикуемое после генерации (п.10.3 ТЗ).
 type BarcodeGeneratedEvent struct {
-	UserID      string         `json:"userId"`
-	BuildID     string         `json:"buildId"`
-	BatchID     string         `json:"batchId,omitempty"`
-	Revision    string         `json:"revision"`
-	BarcodeType string         `json:"barcodeType"`
-	BarcodeURL  string         `json:"barcodeUrl"`
-	Fields      map[string]any `json:"fields"`
+	UserID       string         `json:"userId"`
+	BuildID      string         `json:"buildId"`
+	BatchID      string         `json:"batchId,omitempty"`
+	Revision     string         `json:"revision"`
+	BarcodeType  string         `json:"barcodeType"`
+	BarcodeURL   string         `json:"barcodeUrl"`
+	GenerationID string         `json:"generationId,omitempty"`
+	Fields       map[string]any `json:"fields"`
 	// Billing — разбивка оплаты по источникам (п.10.3 ТЗ).
 	Billing   *BarcodeGeneratedBilling `json:"billing,omitempty"`
 	CreatedAt string                   `json:"createdAt"`

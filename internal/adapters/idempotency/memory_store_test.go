@@ -98,6 +98,52 @@ func TestMemoryStore_DeleteReleasesInFlight(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_CheckpointSurvivesDelete(t *testing.T) {
+	store := NewMemoryStore(10 * time.Second)
+	ctx := context.Background()
+
+	if _, found, _ := store.GetCheckpoint(ctx, "key-cp", "derive"); found {
+		t.Fatal("checkpoint must be absent initially")
+	}
+
+	payload := []byte(`{"requestHash":"h","fields":{"DCK":"INV-1"}}`)
+	if err := store.SetCheckpoint(ctx, "key-cp", "derive", payload); err != nil {
+		t.Fatalf("SetCheckpoint failed: %v", err)
+	}
+
+	got, found, err := store.GetCheckpoint(ctx, "key-cp", "derive")
+	if err != nil || !found {
+		t.Fatalf("expected checkpoint found, got %v %v", found, err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("checkpoint body mismatch: %s", got)
+	}
+
+	// Delete in-flight/terminal ключа НЕ должен удалять accepted checkpoint.
+	_ = store.Delete(ctx, "key-cp")
+	if _, found, _ := store.GetCheckpoint(ctx, "key-cp", "derive"); !found {
+		t.Fatal("checkpoint must survive Delete of the idempotency key")
+	}
+
+	// Разные имена checkpoint не пересекаются.
+	if _, found, _ := store.GetCheckpoint(ctx, "key-cp", "render"); found {
+		t.Fatal("distinct checkpoint names must not collide")
+	}
+}
+
+func TestMemoryStore_CheckpointExpires(t *testing.T) {
+	store := NewMemoryStore(50 * time.Millisecond)
+	ctx := context.Background()
+
+	if err := store.SetCheckpoint(ctx, "key-cpttl", "derive", []byte(`{}`)); err != nil {
+		t.Fatalf("SetCheckpoint failed: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, found, _ := store.GetCheckpoint(ctx, "key-cpttl", "derive"); found {
+		t.Fatal("expected checkpoint to expire with TTL")
+	}
+}
+
 func TestMemoryStore_DeleteFinishedKey(t *testing.T) {
 	store := NewMemoryStore(10 * time.Second)
 	ctx := context.Background()

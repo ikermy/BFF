@@ -19,6 +19,7 @@ import (
 	"github.com/ikermy/BFF/internal/adapters/idempotency"
 	kafkaadapter "github.com/ikermy/BFF/internal/adapters/kafka"
 	"github.com/ikermy/BFF/internal/adapters/revisions"
+	"github.com/ikermy/BFF/internal/adapters/revisions/revisionstest"
 	"github.com/ikermy/BFF/internal/adapters/timeouts"
 	"github.com/ikermy/BFF/internal/adapters/topupbonus"
 	"github.com/ikermy/BFF/internal/ports"
@@ -56,7 +57,16 @@ func makeHandlers(t *testing.T, topupPath string) (gintransport.Handlers, ports.
 	barcodeClient := barcodegen.NewMockClient()
 	eventPublisher := events.NewMockPublisher()
 	historyClient := history.NewMockClient()
-	revisionStore := revisions.NewMemoryStore()
+	var revisionStore *revisions.MemoryStore
+	if t != nil {
+		revisionStore = revisionstest.MustLoad(t)
+	} else {
+		s, err := revisionstest.Load()
+		if err != nil {
+			panic("revisionstest.Load: " + err.Error())
+		}
+		revisionStore = s
+	}
 
 	quoteCase := usecase.NewQuoteUseCase(billingClient)
 	bulkCase := usecase.NewBulkUseCase(billingClient)

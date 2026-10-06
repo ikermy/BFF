@@ -1,0 +1,52 @@
+name: US_FL_05012019
+displayName: "Florida 2019"
+enabled: true
+revisionEffectiveDate: "2019-05-01"
+country: USA
+supportedModes: [prepare, auto, prepared]
+renderAllowlist: [DAJ, DDB, QQQ, DAC, DAD, DCS, DBB, DBC, DAQ, DDA, DBD, DBA, DCK, DCF, DCA, DCB, DCD, DAU, DAG, DAI, DAK, DDK, DDL]
+defaults:
+  QQQ: "DL"
+  DCA: "E"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DDA: "F"
+  DAD: ""
+requiredInputFields: [firstName, lastName, dateOfBirth, street, city, zipCode, height]
+baseInput: [firstName, lastName, dateOfBirth]
+generationSteps:
+  - id: s0_random_daq
+    endpoint: random
+    input: [DAJ, DAC, DAD, DCS, DBB, DBC, QQQ, DCA, DCB, DCD, DAU, DAG, DAI, DAK, DDA, DDB, DDK, DDL, ZFC, ZFJ]
+    output: [DAQ]
+  - id: s1_random_dbddba
+    endpoint: random
+    input: [DAJ, DBB, DDB, DDA, QQQ, DAQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAG, DAI, DAK, DDK, DDL, ZFC, ZFJ]
+    output: [DBD, DBA]
+  - id: s2_calculate_dck
+    endpoint: calculate
+    input: [DAJ, DBD, DAQ, DBA, DBB, QQQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAG, DAI, DAK, DDA, DDB, DDK, DDL, ZFC, ZFJ]
+    output: [DCK]
+  - id: s3_calculate_dcf
+    endpoint: calculate
+    input: [DAJ, QQQ, DAQ, DCS, DAC, DAD, DCA, DCB, DCD, DBD, DBB, DBA, DBC, DAU, DAG, DAI, DAK, DCK, DDA, DDB, DDK, DDL, ZFC, ZFJ]
+    output: [DCF]
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: middleName, type: string, required: false, label: "Middle Name", order: 2}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 3}
+    - {name: street, type: string, required: true, label: "Street", order: 4}
+    - {name: city, type: string, required: true, label: "City", order: 5}
+    - {name: zipCode, type: string, required: true, label: "ZIP/Postal", order: 6}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 7, validation: {maxDate: "today-16y"}}
+    - {name: sex, type: enum, required: false, label: "Sex", order: 8, options: ["1", "2"]}
+    - {name: realId, type: enum, required: false, label: "Real ID", order: 9, options: ["", "N", "F"]}
+    - {name: vehicleClass, type: enum, required: false, label: "Class", order: 10, options: ["A", "B", "E"]}
+    - {name: restrictions, type: enum, required: false, label: "Restrictions", order: 11, options: ["NONE", "A", "B"]}
+    - {name: endorsements, type: enum, required: false, label: "Endorsements", order: 12, options: ["NONE", "A"]}
+    - {name: height, type: number, required: false, label: "Height (in)", order: 13}
+    - {name: organDonor, type: enum, required: false, label: "Organ Donor", order: 14, options: ["false", "true"]}
+    - {name: veteran, type: enum, required: false, label: "Veteran", order: 15, options: ["false", "true"]}
+    - {name: safeDriver, type: enum, required: false, label: "Safe Driver", order: 16, options: ["false", "true"]}

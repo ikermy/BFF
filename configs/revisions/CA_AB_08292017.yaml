@@ -1,0 +1,39 @@
+name: CA_AB_08292017
+displayName: "Alberta"
+enabled: true
+revisionEffectiveDate: "2017-08-29"
+country: CA
+heightCm: true
+supportedModes: [prepare, prepared]
+renderAllowlist: [DAJ, DDB, QQQ, DCA, DCB, DCD, DCS, DAC, DAD, DBB, DBC, DAY, DAU, DAG, DAI, DAK, DAZ, DAW, DAX, DBD, DBA, DAQ, DCF]
+defaults:
+  QQQ: "DL"
+  DCA: "G2"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DAD: ""
+requiredInputFields: [firstName, lastName, dateOfBirth, issueDate, expirationDate, dlNumber, documentDiscriminator, street, city, zipCode, eyeColor, hairColor, height, weightPounds]
+baseInput: [firstName, lastName, dateOfBirth, issueDate, expirationDate, dlNumber, documentDiscriminator]
+generationSteps: []
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: middleName, type: string, required: false, label: "Middle Name", order: 2}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 3}
+    - {name: street, type: string, required: true, label: "Street", order: 4}
+    - {name: city, type: string, required: true, label: "City", order: 5}
+    - {name: zipCode, type: string, required: true, label: "ZIP/Postal", order: 6}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 7, validation: {maxDate: "today-16y"}}
+    - {name: sex, type: enum, required: false, label: "Sex", order: 8, options: ["1", "2"]}
+    - {name: vehicleClass, type: enum, required: false, label: "Class", order: 9, options: ["5", "G2", "A"]}
+    - {name: restrictions, type: enum, required: false, label: "Restrictions", order: 10, options: ["NONE"]}
+    - {name: endorsements, type: enum, required: false, label: "Endorsements", order: 11, options: ["NONE", "Z"]}
+    - {name: height, type: number, required: false, label: "Height (in)", order: 12}
+    - {name: weightPounds, type: number, required: false, label: "Weight (lbs)", order: 13}
+    - {name: eyeColor, type: enum, required: false, label: "Eye Color", order: 14, options: ["BLK", "BLU", "BRO", "DIC", "GRY", "GRN", "HAZ", "MAR", "PNK", "UNK"]}
+    - {name: hairColor, type: enum, required: false, label: "Hair Color", order: 15, options: ["BAL", "RED", "BLK", "SDY", "BLN", "WHI", "BRO", "GRY", "UNK"]}
+    - {name: issueDate, type: date, required: true, label: "Issue Date", order: 16}
+    - {name: expirationDate, type: date, required: true, label: "Expiration Date", order: 17}
+    - {name: dlNumber, type: string, required: true, label: "Document Number", order: 18}
+    - {name: documentDiscriminator, type: string, required: true, label: "Document Discriminator", order: 19}

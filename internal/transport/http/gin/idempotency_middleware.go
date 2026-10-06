@@ -2,7 +2,10 @@ package gintransport
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/ikermy/BFF/internal/domain"
@@ -11,6 +14,40 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// idemHashSuffix — суффикс ключа для сохранения hash тела запроса (ПЛАН §3.3).
+const idemHashSuffix = ":hash"
+
+// requestBodyHash возвращает sha256 тела запроса, восстанавливая Body для хендлера.
+func requestBodyHash(c *gin.Context) string {
+	if c.Request == nil || c.Request.Body == nil {
+		return ""
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return ""
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+// hashMismatch: true, если для ключа сохранён hash и он не совпадает с текущим
+// (повторное использование ключа с другим телом). Если hash не сохранён — false.
+func hashMismatch(store ports.IdempotencyStore, c *gin.Context, key, current string) bool {
+	if current == "" {
+		return false
+	}
+	stored, found, err := store.Get(c.Request.Context(), key+idemHashSuffix)
+	if err != nil || !found {
+		return false
+	}
+	// Защита от ложных срабатываний: считаем hash только валидной 64-символьной hex-строкой.
+	if len(stored) != 64 {
+		return false
+	}
+	return string(stored) != current
+}
 
 // maxIdempotencyBodySize — максимальный размер тела ответа, сохраняемого в IdempotencyStore.
 // Защита от OOM: при больших ответах (файлы, крупные batch-результаты) bytes.Buffer
@@ -71,9 +108,19 @@ func IdempotencyMiddleware(store ports.IdempotencyStore, enableIdempotency ...bo
 			return
 		}
 
+		reqHash := requestBodyHash(c)
+
 		// Фаза 1b: проверяем готовый кэш
 		cached, found, err := store.Get(c.Request.Context(), key)
 		if err == nil && found {
+			if hashMismatch(store, c, key, reqHash) {
+				c.JSON(http.StatusConflict, ErrorResponse{
+					Code:    "IDEMPOTENCY_KEY_REUSED",
+					Message: "this idempotency key was used with a different request body",
+				})
+				c.Abort()
+				return
+			}
 			metrics.DuplicateRequestsTotal.Inc()
 			c.Header("X-Idempotency-Replayed", "true")
 			c.Data(http.StatusOK, "application/json", markDuplicateResponse(cached))
@@ -94,6 +141,14 @@ func IdempotencyMiddleware(store ports.IdempotencyStore, enableIdempotency ...bo
 		if !reserved {
 			cached, found, getErr := store.Get(c.Request.Context(), key)
 			if getErr == nil && found {
+				if hashMismatch(store, c, key, reqHash) {
+					c.JSON(http.StatusConflict, ErrorResponse{
+						Code:    "IDEMPOTENCY_KEY_REUSED",
+						Message: "this idempotency key was used with a different request body",
+					})
+					c.Abort()
+					return
+				}
 				metrics.DuplicateRequestsTotal.Inc()
 				c.Header("X-Idempotency-Replayed", "true")
 				c.Data(http.StatusOK, "application/json", markDuplicateResponse(cached))
@@ -120,8 +175,12 @@ func IdempotencyMiddleware(store ports.IdempotencyStore, enableIdempotency ...bo
 		// ключом немедленно, а не ждать истечения TTL, постоянно получая 409 REQUEST_IN_FLIGHT.
 		if capture.Status() >= 200 && capture.Status() < 300 && capture.body.Len() > 0 && !capture.overflowed {
 			_ = store.Set(c.Request.Context(), key, capture.body.Bytes())
+			if reqHash != "" {
+				_ = store.Set(c.Request.Context(), key+idemHashSuffix, []byte(reqHash))
+			}
 		} else {
 			_ = store.Delete(c.Request.Context(), key)
+			_ = store.Delete(c.Request.Context(), key+idemHashSuffix)
 		}
 	}
 }

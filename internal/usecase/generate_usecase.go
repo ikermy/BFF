@@ -2,9 +2,16 @@ package usecase
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"math"
 	"net"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -13,6 +20,29 @@ import (
 	"github.com/ikermy/BFF/internal/metrics"
 	"github.com/ikermy/BFF/internal/ports"
 )
+
+// Имена accepted derive checkpoints (ПЛАН §3.3).
+const (
+	deriveCheckpointName = "derive"
+	renderCheckpointName = "render"
+)
+
+// deriveCheckpoint — принятый результат derive-цепочки, сохраняемый под
+// X-Idempotency-Key. Повторная попытка (после сбоя до terminal-ответа)
+// переиспользует его вместо повторного random/calculate.
+type deriveCheckpoint struct {
+	RequestHash string         `json:"requestHash"`
+	Fields      map[string]any `json:"fields"`
+	Computed    []string       `json:"computed"`
+	Skipped     []string       `json:"skipped"`
+}
+
+// renderCheckpoint — принятый результат render (stable generationId + barcodes),
+// сохраняемый до Billing.Capture для status reconciliation.
+type renderCheckpoint struct {
+	GenerationIDs []string             `json:"generationIds"`
+	Barcodes      []domain.BarcodeItem `json:"barcodes"`
+}
 
 // Retry-параметры для BarcodeGen (п.14.3 ТЗ).
 const maxBarcodeGenRetries = 3
@@ -39,6 +69,8 @@ type GenerateUseCase struct {
 	transHistory  ports.TransHistoryPublisher
 	ai            ports.AIClient
 	revisionStore ports.RevisionConfigStore // для validateMinimumSet (п.5.2 ТЗ)
+	idem          ports.IdempotencyStore    // accepted derive checkpoints (ПЛАН §3.3)
+	reconciler    ports.RenderReconciler    // reconciliation внутреннего render registry (ПЛАН §B.5)
 	allowPartial  bool
 }
 
@@ -86,6 +118,20 @@ func (u *GenerateUseCase) WithPartialSuccessEnabled(enabled bool) *GenerateUseCa
 	return u
 }
 
+// WithIdempotencyStore подключает хранилище для accepted derive checkpoints
+// (ПЛАН §3.3). Без него checkpoints не сохраняются/не переиспользуются.
+func (u *GenerateUseCase) WithIdempotencyStore(store ports.IdempotencyStore) *GenerateUseCase {
+	u.idem = store
+	return u
+}
+
+// WithRenderReconciler подключает reconciliation внутреннего render registry
+// (ПЛАН §B.5): ambiguous timeout разрешается без повторного encoder run.
+func (u *GenerateUseCase) WithRenderReconciler(r ports.RenderReconciler) *GenerateUseCase {
+	u.reconciler = r
+	return u
+}
+
 // Execute — оркестрирует quote → chain → block → generate → capture/release → publish.
 // Реализует Compensating Transactions (п.14.4 ТЗ):
 // при частичном сбое BarcodeGen — Capture успешных, Release неудачных.
@@ -97,15 +143,30 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 		return domain.GenerateResponse{}, domain.NewValidationError("revision is required")
 	}
 
+	// authenticated ownerId для internal render (BarcodeGen) — из контекста.
+	ctx = domain.WithUserID(ctx, userID)
+
 	// Валидация минимального набора обязательных входных полей (п.5.2 ТЗ).
 	// Проверяем только присутствие полей — бизнес-правила проверяет BarcodeGen.
+	var cfg domain.RevisionConfig
 	if u.revisionStore != nil {
-		cfg, cfgErr := u.revisionStore.GetConfig(ctx, req.Revision)
+		c, cfgErr := u.revisionStore.GetConfig(ctx, req.Revision)
 		if cfgErr != nil {
 			return domain.GenerateResponse{}, domain.NewValidationError("revision not found: " + req.Revision)
 		}
+		cfg = c
 		if appErr := validateMinimumSet(cfg, req.Fields); appErr != nil {
 			return domain.GenerateResponse{}, appErr
+		}
+		// ПЛАН §3.3 (шаг 1 auto / шаг 2 prepared): choice fallbacks + closed-choice
+		// validation выполняются до quote — единый finalizer для всех режимов.
+		if len(cfg.Fields) > 0 {
+			baseFields := cloneFields(req.Fields)
+			applyChoiceFallbacks(cfg.Fields, baseFields)
+			if appErr := validateClosedChoicesFromFields(cfg.Fields, baseFields); appErr != nil {
+				return domain.GenerateResponse{}, appErr
+			}
+			req.Fields = baseFields
 		}
 	}
 
@@ -159,14 +220,23 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 		skipped  []string
 	)
 
-	if u.chain != nil && len(req.Fields) > 0 {
-		chainResult, chainErr := u.chain.Execute(ctx, req.Revision, req.Fields)
-		if chainErr != nil {
-			return domain.GenerateResponse{}, chainErr
+	if req.Mode != "prepared" {
+		// ПЛАН §3.3: если для этого X-Idempotency-Key already accepted derive
+		// checkpoint, переиспользуем его — повторный random/calculate не выполняем.
+		if cp, ok := u.loadDeriveCheckpoint(ctx, req); ok {
+			resolvedFields = cp.Fields
+			computed = cp.Computed
+			skipped = cp.Skipped
+		} else if u.chain != nil && len(req.Fields) > 0 {
+			chainResult, chainErr := u.chain.ExecuteGrouped(ctx, req.Revision, req.Fields)
+			if chainErr != nil {
+				return domain.GenerateResponse{}, chainErr
+			}
+			resolvedFields = chainResult.Fields
+			computed = chainResult.Computed
+			skipped = chainResult.Skipped
+			u.saveDeriveCheckpoint(ctx, req, resolvedFields, computed, skipped)
 		}
-		resolvedFields = chainResult.Fields
-		computed = chainResult.Computed
-		skipped = chainResult.Skipped
 	}
 
 	// sagaID вычисляется один раз — используется и для AI (SagaID в запросе) и для Billing.Block.
@@ -240,14 +310,45 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 
 	// Генерируем все баркоды с retry (п.14.3 ТЗ) — НЕ падаем при первой ошибке.
 	// Накапливаем успешные и считаем неудачные для Capture/Release (п.14.4 ТЗ).
+	//
+	// engineFields (renderValues) отделены от public/AI/history данных (ПЛАН §3.3):
+	// только allowlisted engine-поля профиля, затем public→engine маппинг.
+	engineFields := resolvedFields
+	if strings.EqualFold(req.BarcodeType, "") || strings.EqualFold(req.BarcodeType, "pdf417") {
+		engineFields = filterRenderValues(cfg.RenderAllowlist, resolvedFields)
+	}
+	engineFields = domain.NormalizeEngineFields(engineFields)
+	// static-константы профиля (QQQ/DCA/DBC/…), если не заданы пользователем/derive.
+	domain.ApplyEngineDefaults(engineFields, cfg.Defaults)
+
+	// requiredRenderFields: обязательные engine-поля перед render (ПЛАН §3.5).
+	if missing := missingRenderFields(cfg.RequiredRenderFields, engineFields); len(missing) > 0 {
+		return domain.GenerateResponse{}, domain.NewRequiredFieldsError(missing)
+	}
+
+	// prepared: валидируем готовую пару дат (без перегенерации) → 422 (МИКРО_ТЗ дат).
+	if req.Mode == "prepared" {
+		if appErr := validatePreparedDates(engineFields, cfg.RevisionEffectiveDate); appErr != nil {
+			return domain.GenerateResponse{}, appErr
+		}
+	}
+
+	// Country-aware кодирование дат (US→MMDDYYYY, CA→YYYYMMDD), рост→см и
+	// guard возраста <16 (doc BFF_ПОЛЯ_И_ЦЕПОЧКИ_ПО_РЕВИЗИЯМ).
+	if appErr := applyRenderTransforms(engineFields, cfg); appErr != nil {
+		return domain.GenerateResponse{}, appErr
+	}
+
 	barcodes := make([]domain.BarcodeItem, 0, generateCount)
 	failedCount := 0
 	for i := 0; i < generateCount; i++ {
-		item, genErr := generateWithRetry(ctx, u.barcode, req, resolvedFields, buildBarcodeGenIdempotencyKey(req.IdempotencyKey, i))
+		generationID := buildGenerationID(req, i)
+		item, genErr := generateWithRetry(ctx, u.barcode, u.reconciler, req, engineFields, generationID)
 		if genErr != nil {
 			failedCount++
 			continue
 		}
+		item.GenerationID = generationID
 		barcodes = append(barcodes, item)
 	}
 
@@ -267,6 +368,11 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 			fmt.Errorf("all %d generation attempts failed", generateCount),
 		)
 	}
+
+	// ПЛАН §3.3: accepted render checkpoint (stable generationId + barcodes)
+	// сохраняем ДО Capture, чтобы status reconciliation видел уже отрендеренные
+	// баркоды даже при сбое финализации.
+	u.saveRenderCheckpoint(ctx, req, barcodes)
 
 	// Capture только успешных (п.14.4 ТЗ).
 	if err := u.billing.Capture(ctx, sagaID, successCount); err != nil {
@@ -346,13 +452,14 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, bc := range barcodes {
 		_ = u.events.PublishBarcodeGenerated(ctx, domain.BarcodeGeneratedEvent{
-			UserID:      userID,
-			BuildID:     req.BuildID,
-			BatchID:     req.BatchID,
-			Revision:    req.Revision,
-			BarcodeType: req.BarcodeType,
-			BarcodeURL:  bc.URL,
-			Fields:      resolvedFields,
+			UserID:       userID,
+			BuildID:      req.BuildID,
+			BatchID:      req.BatchID,
+			Revision:     req.Revision,
+			BarcodeType:  req.BarcodeType,
+			BarcodeURL:   bc.URL,
+			GenerationID: bc.GenerationID,
+			Fields:       resolvedFields,
 			Billing: &domain.BarcodeGeneratedBilling{
 				TotalCost: billing.TotalCost / float64(successCount),
 				BySource:  quote.BySource,
@@ -418,6 +525,7 @@ func (u *GenerateUseCase) Execute(ctx context.Context, userID string, req domain
 func generateWithRetry(
 	ctx context.Context,
 	client ports.BarcodeGenClient,
+	reconciler ports.RenderReconciler,
 	req domain.GenerateRequest,
 	fields map[string]any,
 	idempotencyKey string,
@@ -430,6 +538,22 @@ func generateWithRetry(
 			return item, nil
 		}
 		lastErr = err
+		log.Printf("generate: barcodegen attempt %d/%d failed (revision=%s, type=%s): %v", attempt+1, maxBarcodeGenRetries, req.Revision, req.BarcodeType, err)
+		// ПЛАН §B.5: ambiguous timeout/сетевую ошибку разрешаем через reconciliation
+		// внутреннего render registry — повторный энкодер не запускаем.
+		if reconciler != nil && idempotencyKey != "" {
+			if res, rerr := reconciler.RenderStatus(ctx, idempotencyKey); rerr == nil {
+				switch strings.ToUpper(res.Status) {
+				case "SUCCEEDED":
+					metrics.BarcodeGenCallsTotal.WithLabelValues("reconciled").Inc()
+					return domain.BarcodeItem{URL: res.BarcodeURL, Format: res.Format, GenerationID: idempotencyKey}, nil
+				case "FAILED":
+					metrics.BarcodeGenCallsTotal.WithLabelValues("error").Inc()
+					return domain.BarcodeItem{}, domain.NewBarcodeGenError(
+						fmt.Errorf("render %s failed: %s", idempotencyKey, res.ErrorCategory))
+				}
+			}
+		}
 		if !isRetryableBarcodeGenError(err) {
 			metrics.BarcodeGenCallsTotal.WithLabelValues("error").Inc() // п.17 ТЗ
 			return domain.BarcodeItem{}, err
@@ -486,11 +610,217 @@ func generateBarcode(
 	}
 }
 
-func buildBarcodeGenIdempotencyKey(base string, index int) string {
-	if base == "" {
+// cloneFields — поверхностная копия входных полей: choice fallbacks и
+// public→engine маппинг не должны мутировать карту вызывающего.
+func cloneFields(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// digitsOnly оставляет только цифры (принимаем MMDDYYYY / MM/DD/YYYY / MM-DD-YYYY).
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+var (
+	dateISORe = regexp.MustCompile(`^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$`)
+	dateUSRe  = regexp.MustCompile(`^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$`)
+)
+
+// parseDMY разбирает дату из YYYY-MM-DD / MM/DD/YYYY / MMDDYYYY (и вариаций разделителей).
+func parseDMY(s string) (mm, dd, yyyy int, ok bool) {
+	s = strings.TrimSpace(s)
+	if m := dateISORe.FindStringSubmatch(s); m != nil {
+		yyyy, _ = strconv.Atoi(m[1])
+		mm, _ = strconv.Atoi(m[2])
+		dd, _ = strconv.Atoi(m[3])
+	} else if m := dateUSRe.FindStringSubmatch(s); m != nil {
+		mm, _ = strconv.Atoi(m[1])
+		dd, _ = strconv.Atoi(m[2])
+		yyyy, _ = strconv.Atoi(m[3])
+	} else {
+		d := digitsOnly(s)
+		if len(d) != 8 {
+			return 0, 0, 0, false
+		}
+		mm, _ = strconv.Atoi(d[0:2])
+		dd, _ = strconv.Atoi(d[2:4])
+		yyyy, _ = strconv.Atoi(d[4:8])
+	}
+	if mm < 1 || mm > 12 || dd < 1 || dd > 31 || yyyy < 1900 || yyyy > 2100 {
+		return 0, 0, 0, false
+	}
+	return mm, dd, yyyy, true
+}
+
+// applyRenderTransforms приводит engine-поля к формату exact-профиля перед render:
+//   - даты DBB/DBD/DBA: US → MMDDYYYY, CA → YYYYMMDD;
+//   - DBB младше 16 лет → VALIDATION_ERROR (защита getRandomDate от зацикливания);
+//   - DAU: дюймы → см (ON/AB).
+func applyRenderTransforms(fields map[string]any, cfg domain.RevisionConfig) *domain.AppError {
+	for _, code := range []string{"DBB", "DBD", "DBA"} {
+		raw, ok := fields[code]
+		if !ok || raw == nil {
+			continue
+		}
+		s, _ := raw.(string)
+		if s == "" {
+			continue
+		}
+		mm, dd, yyyy, ok := parseDMY(s)
+		if !ok {
+			return domain.NewValidationError("invalid date value for " + code)
+		}
+		us := fmt.Sprintf("%02d%02d%04d", mm, dd, yyyy)
+		if code == "DBB" {
+			now := time.Now()
+			age := now.Year() - yyyy
+			if now.Month() < time.Month(mm) || (now.Month() == time.Month(mm) && now.Day() < dd) {
+				age--
+			}
+			if age < 16 {
+				return domain.NewValidationError("date of birth must be at least 16 years ago")
+			}
+		}
+		if cfg.Country == "CA" {
+			fields[code] = fmt.Sprintf("%04d%02d%02d", yyyy, mm, dd)
+		} else {
+			fields[code] = us
+		}
+	}
+	if cfg.HeightCm {
+		if raw, ok := fields["DAU"]; ok && raw != nil {
+			if n, err := strconv.Atoi(strings.TrimSpace(fmt.Sprintf("%v", raw))); err == nil {
+				fields["DAU"] = strconv.Itoa(int(math.Round(float64(n) * 2.54)))
+			}
+		}
+	}
+	// Georgia: county → ZGD (нормализация + подтверждённые source-исключения).
+	if daj, _ := fields["DAJ"].(string); daj == "GA" {
+		if z, ok := fields["ZGD"].(string); ok {
+			up := strings.ToUpper(strings.TrimSpace(z))
+			switch up {
+			case "SCHLEY":
+				up = "SCHELEY"
+			case "TREUTLEN":
+				up = "TRETLEN"
+			}
+			fields["ZGD"] = up
+		}
+	}
+	return nil
+}
+
+// buildGenerationID возвращает stable generationId юнита (ПЛАН §3.3). Он же
+// используется как renderKey BarcodeGen: retry/replay при потерянном кэше
+// идемпотентности переиспользует тот же barcode, а не создаёт дубль.
+func buildGenerationID(req domain.GenerateRequest, index int) string {
+	if req.IdempotencyKey == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s:%d", base, index)
+	return domain.StableGenerationID(req.IdempotencyKey, index)
+}
+
+// generateRequestHash — детерминированный отпечаток тела generate-запроса,
+// защищающий accepted checkpoints от повторного использования с другим телом.
+func generateRequestHash(req domain.GenerateRequest) string {
+	payload := struct {
+		Revision          string         `json:"revision"`
+		Mode              string         `json:"mode"`
+		Units             int            `json:"units"`
+		BuildID           string         `json:"buildId"`
+		BatchID           string         `json:"batchId"`
+		Confirmed         bool           `json:"confirmed"`
+		GenerateSignature bool           `json:"generateSignature"`
+		SignatureStyle    string         `json:"signatureStyle"`
+		GeneratePhoto     bool           `json:"generatePhoto"`
+		PhotoDescription  string         `json:"photoDescription"`
+		Gender            string         `json:"gender"`
+		Age               int            `json:"age"`
+		Fields            map[string]any `json:"fields"`
+	}{
+		Revision:          req.Revision,
+		Mode:              req.Mode,
+		Units:             req.Units,
+		BuildID:           req.BuildID,
+		BatchID:           req.BatchID,
+		Confirmed:         req.Confirmed,
+		GenerateSignature: req.GenerateSignature,
+		SignatureStyle:    req.SignatureStyle,
+		GeneratePhoto:     req.GeneratePhoto,
+		PhotoDescription:  req.PhotoDescription,
+		Gender:            req.Gender,
+		Age:               req.Age,
+		Fields:            req.Fields,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// loadDeriveCheckpoint возвращает accepted derive checkpoint, только если он
+// принадлежит тому же телу запроса (совпадение request hash).
+func (u *GenerateUseCase) loadDeriveCheckpoint(ctx context.Context, req domain.GenerateRequest) (deriveCheckpoint, bool) {
+	if u.idem == nil || req.IdempotencyKey == "" {
+		return deriveCheckpoint{}, false
+	}
+	raw, found, err := u.idem.GetCheckpoint(ctx, req.IdempotencyKey, deriveCheckpointName)
+	if err != nil || !found {
+		return deriveCheckpoint{}, false
+	}
+	var cp deriveCheckpoint
+	if json.Unmarshal(raw, &cp) != nil || cp.Fields == nil {
+		return deriveCheckpoint{}, false
+	}
+	if cp.RequestHash == "" || cp.RequestHash != generateRequestHash(req) {
+		return deriveCheckpoint{}, false
+	}
+	return cp, true
+}
+
+// saveDeriveCheckpoint сохраняет принятый derive-результат (best-effort).
+func (u *GenerateUseCase) saveDeriveCheckpoint(ctx context.Context, req domain.GenerateRequest, fields map[string]any, computed, skipped []string) {
+	if u.idem == nil || req.IdempotencyKey == "" {
+		return
+	}
+	raw, err := json.Marshal(deriveCheckpoint{
+		RequestHash: generateRequestHash(req),
+		Fields:      fields,
+		Computed:    computed,
+		Skipped:     skipped,
+	})
+	if err != nil {
+		return
+	}
+	_ = u.idem.SetCheckpoint(ctx, req.IdempotencyKey, deriveCheckpointName, raw)
+}
+
+// saveRenderCheckpoint сохраняет принятый render-результат (best-effort).
+func (u *GenerateUseCase) saveRenderCheckpoint(ctx context.Context, req domain.GenerateRequest, barcodes []domain.BarcodeItem) {
+	if u.idem == nil || req.IdempotencyKey == "" || len(barcodes) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(barcodes))
+	for _, b := range barcodes {
+		ids = append(ids, b.GenerationID)
+	}
+	raw, err := json.Marshal(renderCheckpoint{GenerationIDs: ids, Barcodes: barcodes})
+	if err != nil {
+		return
+	}
+	_ = u.idem.SetCheckpoint(ctx, req.IdempotencyKey, renderCheckpointName, raw)
 }
 
 func isRetryableBarcodeGenError(err error) bool {
@@ -513,6 +843,57 @@ func isRetryableBarcodeGenError(err error) bool {
 		strings.Contains(msg, "status 503") ||
 		strings.Contains(msg, "status 504") ||
 		strings.Contains(strings.ToUpper(msg), "ECONNREFUSED")
+}
+
+// missingRenderFields возвращает отсутствующие обязательные render-поля профиля.
+func missingRenderFields(required []string, fields map[string]any) []string {
+	var missing []string
+	for _, f := range required {
+		if !hasUserValue(fields, f) {
+			missing = append(missing, f)
+		}
+	}
+	return missing
+}
+
+// validatePreparedDates проверяет готовую пару [DBD,DBA] в prepared-режиме без
+// перегенерации: malformed/month 00 → 422 INVALID_GENERATED_DATE, раньше ревизии →
+// 422 ISSUE_DATE_BEFORE_REVISION. Пропускается, если даты не заданы или профиль
+// не объявляет revisionEffectiveDate.
+func validatePreparedDates(fields map[string]any, effectiveDate string) *domain.AppError {
+	dbd, _ := fields["DBD"].(string)
+	dba, _ := fields["DBA"].(string)
+	if dbd == "" || dba == "" || effectiveDate == "" {
+		return nil
+	}
+	if err := ValidateGeneratedDates(dbd, dba, effectiveDate, RealClock{}); err != nil {
+		kind := "malformed"
+		var de *DateValidationError
+		if errors.As(err, &de) && de.Kind == DateBeforeRevision {
+			kind = "before_revision"
+		}
+		return domain.NewInvalidGeneratedDateError(kind, err.Error())
+	}
+	return nil
+}
+
+// filterRenderValues оставляет только allowlisted engine-поля профиля. Пустой
+// allowlist — профиль пока не ограничивает набор (permissive, обратная совместимость).
+func filterRenderValues(allowlist []string, fields map[string]any) map[string]any {
+	if len(allowlist) == 0 {
+		return fields
+	}
+	allowed := make(map[string]bool, len(allowlist))
+	for _, f := range allowlist {
+		allowed[f] = true
+	}
+	out := make(map[string]any, len(fields))
+	for k, v := range fields {
+		if allowed[k] {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // validateMinimumSet проверяет минимальный набор обязательных входных полей (п.5.2 ТЗ).

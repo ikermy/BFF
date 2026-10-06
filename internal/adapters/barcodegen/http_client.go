@@ -173,6 +173,31 @@ func (c *HTTPClient) GenerateCode128(ctx context.Context, req domain.GenerateCod
 	return resp, nil
 }
 
+// Derive — grouped derive для native-контракта (групповой ручки нет): вызываем
+// Random/Calculate по каждому output. Возвращает AAMVA-keyed map.
+func (c *HTTPClient) Derive(ctx context.Context, revision, endpoint string, input map[string]any, output []string) (map[string]any, error) {
+	out := make(map[string]any, len(output))
+	for _, field := range output {
+		var (
+			v   any
+			err error
+		)
+		switch endpoint {
+		case "random":
+			v, err = c.Random(ctx, "", field, input)
+		case "calculate":
+			v, err = c.Calculate(ctx, "", field, input)
+		default:
+			return nil, fmt.Errorf("barcodegen: unsupported derive endpoint: %s", endpoint)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[field] = v
+	}
+	return out, nil
+}
+
 // GenerateRaw — POST /internal/v1/generate/raw (capabilities уточнения ТЗ §4 п.5).
 // Проксирует «сырую» ANSI-строку от Verification Service в BarcodeGen.
 // Биллинг не списывается — служебная/демо генерация.

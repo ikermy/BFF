@@ -1,0 +1,49 @@
+name: US_MT_10072015
+displayName: "Montana 2015"
+enabled: true
+revisionEffectiveDate: "2015-10-07"
+country: USA
+supportedModes: [prepare, auto, prepared]
+renderAllowlist: [DAJ, DDB, QQQ, DBB, DAQ, DBD, DBA, DCK, DCF, DCA, DCB, DCD, DCS, DAC, DAD, DBC, DAU, DAY, DAG, DAI, DAK, DAW]
+defaults:
+  QQQ: "DL"
+  DCA: "N"
+  DCB: "NONE"
+  DCD: "NONE"
+  DBC: "1"
+  DAD: ""
+requiredInputFields: [firstName, lastName, dateOfBirth, street, city, zipCode, eyeColor, height, weightPounds]
+baseInput: [firstName, lastName, dateOfBirth]
+generationSteps:
+  - id: s0_random_daq
+    endpoint: random
+    input: [DAJ, DBB, QQQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAY, DAG, DAI, DAK, DAW, DDB, ZMB]
+    output: [DAQ]
+  - id: s1_random_dbddba
+    endpoint: random
+    input: [DAJ, DBB, DDB, QQQ, DAQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAY, DAG, DAI, DAK, DAW, ZMB]
+    output: [DBD, DBA]
+  - id: s2_calculate_dck
+    endpoint: calculate
+    input: [DAJ, DBD, DAQ, DBA, DBB, QQQ, DCS, DAC, DAD, DCA, DCB, DCD, DBC, DAU, DAY, DAG, DAI, DAK, DAW, DDB, ZMB]
+    output: [DCK]
+  - id: s3_calculate_dcf
+    endpoint: calculate
+    input: [DAJ, DBD, QQQ, DAQ, DCS, DAC, DAD, DCA, DCB, DCD, DBB, DBA, DBC, DAU, DAY, DAG, DAI, DAK, DAW, DCK, DDB, ZMB]
+    output: [DCF]
+schema:
+  fields:
+    - {name: firstName, type: string, required: true, label: "First Name", order: 1}
+    - {name: middleName, type: string, required: false, label: "Middle Name", order: 2}
+    - {name: lastName, type: string, required: true, label: "Last Name", order: 3}
+    - {name: street, type: string, required: true, label: "Street", order: 4}
+    - {name: city, type: string, required: true, label: "City", order: 5}
+    - {name: zipCode, type: string, required: true, label: "ZIP/Postal", order: 6}
+    - {name: dateOfBirth, type: date, required: true, label: "Date of Birth", order: 7, validation: {maxDate: "today-16y"}}
+    - {name: sex, type: enum, required: false, label: "Sex", order: 8, options: ["1", "2"]}
+    - {name: vehicleClass, type: enum, required: false, label: "Class", order: 9, options: ["N", "D"]}
+    - {name: restrictions, type: enum, required: false, label: "Restrictions", order: 10, options: ["NONE", "C", "L"]}
+    - {name: endorsements, type: enum, required: false, label: "Endorsements", order: 11, options: ["NONE"]}
+    - {name: height, type: number, required: false, label: "Height (in)", order: 12}
+    - {name: weightPounds, type: number, required: false, label: "Weight (lbs)", order: 13}
+    - {name: eyeColor, type: enum, required: false, label: "Eye Color", order: 14, options: ["BLK", "BLU", "BRO", "DIC", "GRY", "GRN", "HAZ", "MAR", "PNK", "UNK"]}

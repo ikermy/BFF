@@ -68,6 +68,14 @@ func (c *MockClient) Random(_ context.Context, _ string, field string, params ma
 	if paramType, ok := params["type"].(string); ok && paramType == "date" {
 		return "2026-01-15", nil
 	}
+	// Date-step grouped-профилей (output [DBD,DBA]): валидная пара для
+	// ValidateGeneratedDates (YYYYMMDD, issue >= revisionEffectiveDate, issue <= today).
+	switch field {
+	case "DBD":
+		return "03072022", nil
+	case "DBA":
+		return "03072032", nil
+	}
 	return fmt.Sprintf("RANDOM_%s", field), nil
 }
 

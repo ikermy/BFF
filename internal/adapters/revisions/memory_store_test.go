@@ -9,7 +9,7 @@ import (
 	"github.com/ikermy/BFF/internal/domain"
 )
 
-func TestMemoryStore_LoadFromDirBootstrapsDefaultsIntoEmptyDir(t *testing.T) {
+func TestMemoryStore_EmptyByDefault(t *testing.T) {
 	dir := t.TempDir()
 	store := NewMemoryStore()
 
@@ -20,8 +20,9 @@ func TestMemoryStore_LoadFromDirBootstrapsDefaultsIntoEmptyDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "US_CA_08292017.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("did not expect LoadFromDir to create yaml files automatically, got err=%v", err)
 	}
-	if _, err := store.GetConfig(context.Background(), "US_CA_08292017"); err != nil {
-		t.Fatalf("expected default in-memory revision config to remain available, got %v", err)
+	// ПЛАН §3.1: hardcoded определения удалены — пустой каталог даёт пустой store.
+	if _, err := store.GetConfig(context.Background(), "US_CA_08292017"); err == nil {
+		t.Fatal("expected no in-memory default config, got one")
 	}
 }
 
@@ -35,10 +36,11 @@ func TestMemoryStore_UpdateConfigPersistsToYAML(t *testing.T) {
 		"  - firstName\n" +
 		"  - lastName\n" +
 		"  - dateOfBirth\n" +
-		"calculationChain:\n" +
-		"  - field: DAQ\n" +
-		"    source: calculate\n" +
-		"    dependsOn: [firstName, lastName, dateOfBirth]\n"
+		"generationSteps:\n" +
+		"  - id: daq\n" +
+		"    endpoint: random\n" +
+		"    input: [DAJ]\n" +
+		"    output: [DAQ]\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write yaml: %v", err)
 	}
@@ -50,8 +52,8 @@ func TestMemoryStore_UpdateConfigPersistsToYAML(t *testing.T) {
 
 	update := domain.UpdateRevisionRequest{
 		Enabled: false,
+		// CalculationChain устарел и игнорируется admin-ом (static definition).
 		CalculationChain: []domain.ChainEntry{
-			{Field: "DAQ", Source: "calculate", DependsOn: []string{"firstName", "lastName", "dateOfBirth"}},
 			{Field: "DAE", Source: "random", Params: map[string]any{"type": "date"}},
 		},
 	}
@@ -70,8 +72,9 @@ func TestMemoryStore_UpdateConfigPersistsToYAML(t *testing.T) {
 	if cfg.Enabled {
 		t.Fatal("expected enabled=false after reload")
 	}
-	if len(cfg.CalculationChain) != 2 || cfg.CalculationChain[1].Field != "DAE" || cfg.CalculationChain[1].Source != "random" {
-		t.Fatalf("unexpected calculationChain after reload: %+v", cfg.CalculationChain)
+	// ПЛАН §3.1: admin не перезаписывает статический definition — steps сохраняются.
+	if len(cfg.GenerationSteps) != 1 || cfg.GenerationSteps[0].ID != "daq" {
+		t.Fatalf("generationSteps must be preserved, got: %+v", cfg.GenerationSteps)
 	}
 	if cfg.DisplayName == "" || len(cfg.RequiredInputFields) != 3 {
 		t.Fatalf("expected displayName and requiredInputFields to be preserved, got %+v", cfg)

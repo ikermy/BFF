@@ -61,7 +61,8 @@ func (h *AdminHandler) ListRevisions(c *gin.Context) {
 		return
 	}
 
-	// GET возвращает calculationChain как []string (имена полей) по формату ТЗ п.13.1
+	// GET возвращает calculationChain как []string (имена output-полей) по формату
+	// ТЗ п.13.1. Источник — GenerationSteps (единая модель): плоский список outputs.
 	type revisionView struct {
 		Name             string   `json:"name"`
 		DisplayName      string   `json:"displayName"`
@@ -70,9 +71,9 @@ func (h *AdminHandler) ListRevisions(c *gin.Context) {
 	}
 	views := make([]revisionView, 0, len(configs))
 	for _, cfg := range configs {
-		chain := make([]string, 0, len(cfg.CalculationChain))
-		for _, entry := range cfg.CalculationChain {
-			chain = append(chain, entry.Field)
+		chain := make([]string, 0, len(cfg.GenerationSteps))
+		for _, step := range cfg.GenerationSteps {
+			chain = append(chain, step.Output...)
 		}
 		views = append(views, revisionView{
 			Name:             cfg.Name,
