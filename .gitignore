@@ -14,7 +14,7 @@ coverage.out
 coverage.html
 
 # скрипты для генерации профилей, были нужны один раз
-tools/
+/tools/
 
 # Go workspace / vendoring caches
 vendor/
@@ -39,4 +39,3 @@ Thumbs.db
 # Temporary files
 .tmp/
 tmp/
-
