@@ -13,6 +13,9 @@ coverage.out
 .coverprofile
 coverage.html
 
+# скрипты для генерации профилей, были нужны один раз
+tools/
+
 # Go workspace / vendoring caches
 vendor/
 
